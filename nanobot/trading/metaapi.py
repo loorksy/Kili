@@ -18,7 +18,7 @@ from nanobot.security.secrets import SecretStore
 
 
 class AccountState(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     broker: str
     currency: str
     balance: Decimal
@@ -29,7 +29,7 @@ class AccountState(BaseModel):
 
 
 class BrokerItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     id: str
     symbol: str
     type: str
@@ -42,7 +42,7 @@ class BrokerItem(BaseModel):
 
 
 class SymbolSpec(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     symbol: str
     digits: int = Field(ge=0, le=12)
     min_volume: Decimal = Field(alias="minVolume", gt=0)
@@ -55,7 +55,7 @@ class SymbolSpec(BaseModel):
 
 
 class BrokerPrice(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     symbol: str
     bid: Decimal
     ask: Decimal
@@ -63,7 +63,7 @@ class BrokerPrice(BaseModel):
 
 
 class AccountConnection(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     id: str = Field(alias="_id")
     state: str
     connection_status: str = Field(alias="connectionStatus")
@@ -71,7 +71,7 @@ class AccountConnection(BaseModel):
 
 
 class TradeResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
     string_code: str = Field(alias="stringCode")
     order_id: str | None = Field(default=None, alias="orderId")
     position_id: str | None = Field(default=None, alias="positionId")
