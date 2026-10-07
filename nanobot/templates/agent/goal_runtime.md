@@ -26,6 +26,11 @@ If material requirements remain ambiguous, ask one concise clarification rather 
 - Use ordinary tools and keep work reviewable. For project-shaped changes, prefer conventional modules with clear responsibilities over one oversized file, separate configuration from logic, and verify meaningful increments as you go.
 - Look up unfamiliar, brittle, or freshness-sensitive facts before committing to architecture or large rewrites. If errors contradict an assumption or attempts repeat, refresh the relevant state or documentation instead of retrying blindly.
 - Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `cancel` when the user cancels, `block` only when progress is genuinely blocked, and `replace` only when the objective changes.
+- Goals have stable responsibility IDs independent of conversations. Use `update_goal(action='list')` to find them after a reset, and `bind` with a responsibility ID to link one to the current conversation.
+- Save operational progress using `checkpoint` and `checkpoint_json` (completed_steps, pending_work, result_refs, artifacts). Do not save hidden reasoning or secrets.
+- For future work, use `wait` with `next_wake_ms` (UTC Unix milliseconds), or `waiting_for='user'`, or an event description. Event waits return a local trigger ID; an external source must send matching events to that trigger. A description alone does not monitor an external source.
+- After saving a wait, finish the current response. The gateway wakes scheduled responsibilities through cron, including a missed deadline after restart. No inference should run while waiting. Use `pause` to suspend work and `resume` to schedule a new continuation.
+- Interrupted execution may have external effects. Inspect and reconcile those effects before requesting an explicitly authorized resume; never blindly repeat interrupted tools.
 {% endif %}
 
 [/Goal Runtime Guidance]

@@ -1528,6 +1528,10 @@ class SessionManager:
         sessions_root: Path | None = None,
     ):
         self.workspace = workspace
+        # Convenience access to independent goal records. Session deletion/reset
+        # deliberately does not cascade into this store.
+        from nanobot.session.responsibilities import ResponsibilityStore
+        self.responsibilities = ResponsibilityStore(workspace)
         self._jsonl_store = JsonlSessionStore(workspace, sessions_root=sessions_root)
         self._store: SessionStore = store if store is not None else self._jsonl_store
         self.sessions_dir = self._jsonl_store.sessions_dir

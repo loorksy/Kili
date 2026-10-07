@@ -155,6 +155,19 @@ class LocalTriggerStore:
             remaining = [trigger for trigger in triggers if trigger.id != trigger_id]
             if len(remaining) == len(triggers):
                 return False
+            removed = next(trigger for trigger in triggers if trigger.id == trigger_id)
+            responsibility_id = removed.origin_metadata.get("_responsibility_id")
+            if responsibility_id:
+                from nanobot.session.responsibilities import TERMINAL_STATES, ResponsibilityStore
+                responsibilities = ResponsibilityStore(self.workspace_path)
+                record = responsibilities.get(responsibility_id)
+                if record.state not in TERMINAL_STATES:
+                    # Deleting an automation is explicit; deleting its goal is not.
+                    # Pause before removing the source so a crash cannot lose work.
+                    record.state = "PAUSED"
+                    record.next_wake_ms = None
+                    record.waiting_for = "Event trigger deleted; bind a new trigger before continuing"
+                    responsibilities.save(record)
             self._save_triggers_unlocked(remaining)
             self._delete_delivery_files_for_trigger_unlocked(trigger_id)
             return True

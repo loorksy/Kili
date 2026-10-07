@@ -58,6 +58,14 @@ class TestInit:
 
 
 class TestBuildGitignore:
+    def test_empty_ancestor_git_mount_does_not_disable_memory_versioning(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        workspace = tmp_path / "agent-workspace"
+        workspace.mkdir()
+        store = GitStore(workspace, tracked_files=["MEMORY.md"])
+        assert store.init() is True
+        assert store.is_initialized()
+
     def test_subdirectory_dirs(self, git):
         content = git._build_gitignore()
         assert "!memory/\n" in content

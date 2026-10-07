@@ -36,7 +36,11 @@ def test_shared_and_legacy_paths_remain_global() -> None:
     assert get_legacy_sessions_dir() == Path.home() / ".nanobot" / "sessions"
 
 
-def test_workspace_path_is_explicitly_resolved() -> None:
+def test_workspace_path_is_explicitly_resolved(monkeypatch, tmp_path: Path) -> None:
+    # Exercise real directory creation without writing into the user's home.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    original_expanduser = Path.expanduser
+    monkeypatch.setattr(Path, "expanduser", lambda path: tmp_path / str(path)[2:] if str(path).startswith("~/") else original_expanduser(path))
     assert get_workspace_path() == Path.home() / ".nanobot" / "workspace"
     assert get_workspace_path("~/custom-workspace") == Path.home() / "custom-workspace"
 

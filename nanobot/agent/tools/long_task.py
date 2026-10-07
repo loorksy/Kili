@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,7 @@ from nanobot.agent.goal_permission import (
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
-from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
@@ -28,6 +29,11 @@ from nanobot.session.goal_state import (
     parse_goal_state,
     sustained_goal_active,
 )
+from nanobot.session.responsibilities import (
+    TERMINAL_STATES,
+    ResponsibilityCheckpoint,
+    ResponsibilityState,
+)
 from nanobot.session.turn_continuation import reset_goal_continuation_rounds
 from nanobot.utils.prompt_templates import render_template
 
@@ -35,7 +41,7 @@ if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
 
 
-_GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
+_GOAL_ACTIONS = ("complete", "cancel", "block", "replace", "list", "checkpoint", "wait", "pause", "resume", "bind")
 _CREATE_UNAVAILABLE_ERROR = (
     "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
     "objective as `/goal <task>`."
@@ -81,12 +87,34 @@ class _GoalToolsMixin:
         reset_continuation: bool = False,
     ) -> None:
         previous_metadata = deepcopy(sess.metadata)
+        rc = current_request_context()
+        store = self._sessions.responsibilities
+        responsibility_id = blob.get("responsibility_id")
+        if responsibility_id:
+            record = store.get(responsibility_id)
+        else:
+            from nanobot.security.workspace_access import current_workspace_scope
+            scope = current_workspace_scope()
+            record = store.create(
+                objective=blob["objective"], ui_summary=blob.get("ui_summary", ""),
+                session_key=sess.key, channel=rc.channel if rc else "",
+                chat_id=rc.chat_id if rc else "",
+                workspace_scope=scope.metadata() if scope else None,
+            )
+        record.objective = blob["objective"]
+        record.ui_summary = blob.get("ui_summary", "")
+        record.progress = blob.get("recap", "")
+        states: dict[str, ResponsibilityState] = {"active": "QUEUED", "blocked": "WAITING_FOR_USER",
+                        "completed": "COMPLETED", "cancelled": "CANCELLED"}
+        record.state = states[blob["status"]]
+        record = store.save(record)
+        blob = {**blob, **record.goal_projection()}
         sess.metadata[GOAL_STATE_KEY] = blob
         discard_legacy_goal_state_key(sess.metadata)
         if reset_continuation:
             reset_goal_continuation_rounds(sess.metadata)
         try:
-            self._sessions.save(sess)
+            self._sessions.save(sess, fsync=True)
         except BaseException:
             sess.metadata.clear()
             sess.metadata.update(previous_metadata)
@@ -177,9 +205,14 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         if not request.session_key:
             return None
         session = self._sessions.get_or_create(request.session_key)
+        prior = parse_goal_state(goal_state_raw(session.metadata))
+        record = None
+        if prior and prior.get("responsibility_id"):
+            record = self._sessions.responsibilities.get(prior["responsibility_id"])
+            session.metadata[GOAL_STATE_KEY] = {**prior, **record.goal_projection()}
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(session.metadata)
-        if not goal_start_requested and not goal_active:
+        if not goal_start_requested and not goal_active and not (prior and prior.get("responsibility_id")):
             return None
 
         guidance = render_template(
@@ -189,6 +222,8 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             goal_active=goal_active,
         )
         state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
+        if record is not None:
+            state += "\n" + json.dumps(record.model_dump(mode="json", exclude={"wakes"}), ensure_ascii=False)
         content = "\n\n".join(part for part in (guidance, state) if part)
         return RuntimeContextBlock(source="goal", content=content)
 
@@ -203,6 +238,9 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             return ToolResult.error(
                 "Error: create_goal requires an active chat session (missing routing context)."
             )
+        rc = current_request_context()
+        if not sess.policy.persist or (rc is not None and not rc.persist_session):
+            return ToolResult.error("Error: durable goals require a persistent conversation.")
         if not self._goal_mutation_allowed():
             return ToolResult.error(_CREATE_UNAVAILABLE_ERROR)
         prior = parse_goal_state(goal_state_raw(sess.metadata))
@@ -232,6 +270,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         return (
             "Goal recorded. Keep working toward the objective using ordinary tools. "
             "When fully done and verified, call update_goal with action='complete'."
+            f"\nResponsibility ID: {sess.metadata[GOAL_STATE_KEY]['responsibility_id']}"
             f"{extra}"
         )
 
@@ -258,6 +297,10 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             max_length=120,
             nullable=True,
         ),
+        responsibility_id=StringSchema("Stable responsibility ID; use list to find goals after chat reset.", nullable=True),
+        next_wake_ms=IntegerSchema(description="UTC Unix milliseconds for a scheduled wake. Used with wait.", nullable=True),
+        waiting_for=StringSchema("Event condition, or 'user'. Used with wait; event wakes use a local trigger bound to this ID.", nullable=True),
+        checkpoint_json=StringSchema("JSON object with completed_steps, pending_work, result_refs and artifacts arrays. Operational facts only; no hidden reasoning.", nullable=True),
         required=["action"],
     )
 )
@@ -304,12 +347,81 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         recap: str | None = None,
         objective: str | None = None,
         ui_summary: str | None = None,
+        responsibility_id: str | None = None,
+        next_wake_ms: int | None = None,
+        waiting_for: str | None = None,
+        checkpoint_json: str | None = None,
         **kwargs: Any,
     ) -> str:
         sess = self._session()
         if sess is None:
             return ToolResult.error("Error: update_goal requires an active chat session.")
+        rc = current_request_context()
+        if not sess.policy.persist or (rc is not None and not rc.persist_session):
+            return ToolResult.error("Error: durable goals require a persistent conversation.")
+        store = self._sessions.responsibilities
+        if action == "list":
+            return json.dumps([r.model_dump(mode="json") for r in store.list()], ensure_ascii=False)
         prior = parse_goal_state(goal_state_raw(sess.metadata))
+        responsibility_id = responsibility_id or (prior or {}).get("responsibility_id")
+        if responsibility_id:
+            record = store.get(responsibility_id)
+            prior = {**(prior or {}), **record.goal_projection()}
+            if action in {"checkpoint", "wait", "pause", "resume", "bind"}:
+                if record.state in TERMINAL_STATES:
+                    return ToolResult.error("Error: responsibility is already finished.")
+                if checkpoint_json is not None:
+                    record.checkpoint = ResponsibilityCheckpoint.model_validate_json(checkpoint_json)
+                if recap is not None:
+                    record.progress = recap.strip()[:8000]
+                if action == "wait":
+                    if next_wake_ms is None and not waiting_for:
+                        return ToolResult.error("Error: wait requires next_wake_ms or waiting_for.")
+                    record.next_wake_ms = next_wake_ms
+                    record.wake_generation += 1
+                    record.waiting_for = waiting_for
+                    record.state = "SCHEDULED" if next_wake_ms is not None else (
+                        "WAITING_FOR_USER" if waiting_for == "user" else "WAITING_FOR_EVENT")
+                elif action == "pause":
+                    record.state = "PAUSED"
+                    record.next_wake_ms = None
+                elif action == "resume":
+                    if record.recovery_required and not self._goal_mutation_allowed():
+                        return ToolResult.error("Error: interrupted work may have external effects. Reconcile first; explicit user /goal authorization is required to resume. No interrupted tool is replayed automatically.")
+                    record.state = "SCHEDULED"
+                    import time
+                    record.next_wake_ms = int(time.time() * 1000)
+                    record.waiting_for = None
+                    record.wake_generation += 1
+                    record.recovery_required = False
+                    record.checkpoint.pending_tools = []
+                elif action == "bind":
+                    rc = current_request_context()
+                    assert rc is not None
+                    record.session_key, record.channel, record.chat_id = sess.key, rc.channel, rc.chat_id
+                record = store.save(record)
+                trigger_note = ""
+                if action == "wait" and record.state == "WAITING_FOR_EVENT":
+                    from nanobot.session.responsibility_turns import RESPONSIBILITY_TRIGGER_META
+                    from nanobot.triggers.local_store import LocalTriggerStore
+                    triggers = LocalTriggerStore(self._sessions.workspace)
+                    trigger = next((t for t in triggers.list_triggers()
+                                    if t.origin_metadata.get(RESPONSIBILITY_TRIGGER_META) == record.id), None)
+                    if trigger is None:
+                        trigger = triggers.create(
+                            name=record.ui_summary or "Responsibility event",
+                            session_key=record.session_key or sess.key,
+                            channel=record.channel, chat_id=record.chat_id,
+                            origin_metadata={RESPONSIBILITY_TRIGGER_META: record.id},
+                        )
+                    trigger_note = f" Local trigger ID: {trigger.id}. Send matching events through the existing trigger command."
+                sess.metadata[GOAL_STATE_KEY] = record.goal_projection()
+                self._sessions.save(sess, fsync=True)
+                await self._publish_goal_state_changed(sess.metadata)
+                return f"Responsibility {record.id}: {record.state}. Progress saved.{trigger_note}"
+            # Waiting/paused goals remain explicitly manageable by their stable ID.
+            if record.state not in TERMINAL_STATES:
+                prior["status"] = "active"
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to update."
 
@@ -333,6 +445,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 )
             summary = (ui_summary or "").strip()[:120]
             blob = {
+                **prior,
                 "status": "active",
                 "objective": objective_text,
                 "ui_summary": summary,

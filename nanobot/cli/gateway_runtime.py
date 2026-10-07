@@ -483,6 +483,11 @@ def _run_gateway(
         bus=bus,
         unified_session=config.agents.defaults.unified_session,
     )
+    from nanobot.session.responsibility_turns import (
+        RESPONSIBILITY_CRON_ID,
+        migrate_session_goals,
+        run_responsibility_wakes,
+    )
 
     # Create agent with cron service
     agent = AgentLoop.from_config(
@@ -622,6 +627,14 @@ def _run_gateway(
                     logger.info("Dream commit: {}", sha)
                 store.compact_history()
                 prune_dream_sessions(agent.sessions)
+            return None
+
+        if job.id == RESPONSIBILITY_CRON_ID:
+            await run_responsibility_wakes(
+                session_manager.responsibilities,
+                submit_turn=agent.submit_cron_turn,
+                is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+            )
             return None
 
         # Heartbeat is a system job that checks HEARTBEAT.md for active tasks.
@@ -839,6 +852,13 @@ def _run_gateway(
         _advance_dream_cursor_if_behind(agent.context.memory)
         cron.remove_system_job("dream")
 
+    cron.register_system_job(CronJob(
+        id=RESPONSIBILITY_CRON_ID,
+        name=RESPONSIBILITY_CRON_ID,
+        schedule=CronSchedule(kind="every", every_ms=30_000),
+        payload=CronPayload(kind="system_event"),
+    ))
+
     # Register Heartbeat system job (idempotent on restart)
     if hb_cfg.enabled:
         cron.register_system_job(CronJob(
@@ -915,6 +935,8 @@ def _run_gateway(
             console.print,
         )
         try:
+            migrate_session_goals(session_manager)
+            session_manager.responsibilities.recover()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()
@@ -952,6 +974,7 @@ def _run_gateway(
                         store=trigger_store,
                         submit_turn=agent.submit_local_trigger_turn,
                         is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+                        responsibilities=session_manager.responsibilities,
                     ),
                     name="nanobot-local-triggers",
                 ),

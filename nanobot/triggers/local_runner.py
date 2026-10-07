@@ -11,6 +11,8 @@ from loguru import logger
 
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.session.responsibilities import ResponsibilityStore
+from nanobot.session.responsibility_turns import RESPONSIBILITY_TRIGGER_META
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
@@ -24,6 +26,7 @@ async def run_local_trigger_queue(
     is_channel_enabled: Callable[[str], bool],
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
+    responsibilities: ResponsibilityStore | None = None,
 ) -> None:
     """Poll local trigger deliveries and submit them as session turns."""
     if submit_turn is None:
@@ -48,6 +51,7 @@ async def run_local_trigger_queue(
                     delivery,
                     submit_turn=submit_turn,
                     is_channel_enabled=is_channel_enabled,
+                    responsibilities=responsibilities,
                 )
                 store.complete_delivery(delivery)
             except asyncio.CancelledError as exc:
@@ -133,12 +137,20 @@ async def _deliver_delivery(
     *,
     submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]],
     is_channel_enabled: Callable[[str], bool],
+    responsibilities: ResponsibilityStore | None = None,
 ) -> None:
     trigger = store.get(delivery.trigger_id)
     if trigger is None:
         raise _TerminalDeliveryError("trigger not found")
     if not trigger.enabled:
         raise _TerminalDeliveryError("trigger is disabled")
+    responsibility_id = trigger.origin_metadata.get(RESPONSIBILITY_TRIGGER_META)
+    if responsibility_id and responsibilities is not None:
+        responsibilities.enqueue(responsibility_id, f"trigger:{delivery.id}", delivery.content)
+        store.record_delivery(trigger.id, status="ok", run_at_ms=delivery.created_at_ms)
+        _write_delivery_run_record(store, delivery, trigger=trigger, status="ok",
+                                   response="Responsibility wake durably queued")
+        return
     if not is_channel_enabled(trigger.channel):
         raise _TerminalDeliveryError(f"target channel is not enabled: {trigger.channel}")
 

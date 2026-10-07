@@ -1960,6 +1960,15 @@ class AgentLoop:
             else:
                 ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
+        from nanobot.session.responsibility_turns import RESPONSIBILITY_WAKE_META
+        wake = msg.metadata.get(RESPONSIBILITY_WAKE_META)
+        if isinstance(wake, dict):
+            responsibility = self.sessions.responsibilities.get(wake["id"])
+            if (responsibility.active_wake_id != wake.get("wake_id")
+                    or responsibility.recovery_required
+                    or responsibility.state != "RUNNING"):
+                raise ValueError("Responsibility wake is no longer admitted")
+            session.metadata["goal_state"] = responsibility.goal_projection()
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
         tools = ctx.tools if ctx.tools is not None else self.tools
         if session.policy.disabled_tools:
@@ -2502,6 +2511,11 @@ class AgentLoop:
         """Persist the latest in-flight turn state into session metadata."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save_runtime_checkpoint(session)
+        goal = session.metadata.get("goal_state")
+        if isinstance(goal, dict) and goal.get("responsibility_id"):
+            self.sessions.responsibilities.checkpoint_tools(
+                goal["responsibility_id"], payload, session.key,
+            )
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True
