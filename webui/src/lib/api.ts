@@ -1371,3 +1371,19 @@ export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: 
 export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean) {
   return mutation<{ id: string; status: string }>(transport, "approval.resolve", { session_key: sessionKey, approval_id: approvalId, approve });
 }
+
+export interface IntegrationStatus {
+  charts_enabled: boolean;
+  oanda: { configured: boolean; account_id?: string; environment?: string };
+  metaapi: { configured: boolean; account_id?: string; region?: string };
+  restart_required?: boolean;
+}
+export function fetchIntegrationSettings(token: string) {
+  return request<IntegrationStatus>("/api/settings/integrations", token);
+}
+export function configureIntegration(transport: WebUIMutationTransport, values: Record<string, unknown>) {
+  return mutation<IntegrationStatus>(transport, "settings.integrations.configure", values);
+}
+export function configureInstrumentMapping(transport: WebUIMutationTransport, values: Record<string, unknown>) {
+  return mutation<Record<string, unknown>>(transport, "settings.integrations.map", values);
+}

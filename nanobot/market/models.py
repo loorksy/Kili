@@ -14,6 +14,7 @@ class Connection(Base):
     secret_ref: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     account_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
     environment: Literal["practice", "live"] = "practice"
+    region: str = Field(default="london", pattern=r"^[a-z][a-z0-9-]{1,30}$")
 
 
 class IntegrationsConfig(Base):

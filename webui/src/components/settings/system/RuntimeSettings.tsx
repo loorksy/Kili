@@ -1,3 +1,4 @@
+import { IntegrationSettings } from "./IntegrationSettings";
 import { useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2, PauseCircle, PlayCircle, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -204,6 +205,8 @@ export function RuntimeSettings({
           </SettingsGroup>
         </section>
       ) : null}
+
+      <IntegrationSettings />
 
       <section>
         <SettingsSectionTitle>{tx("settings.api.title", "API server")}</SettingsSectionTitle>

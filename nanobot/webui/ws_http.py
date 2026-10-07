@@ -199,6 +199,8 @@ _WEBUI_MUTATION_PATHS = {
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
+    "settings.integrations.configure": "/api/settings/integrations/configure",
+    "settings.integrations.map": "/api/settings/integrations/map",
     "chart.update": "/api/webui/cloud-charts/update",
     "approval.resolve": "/api/webui/action-approvals/resolve",
     "subagent.cancel": "/api/webui/subagents/cancel",
@@ -612,6 +614,9 @@ class GatewayHTTPHandler:
         if got == "/webui/terminal":
             return self._handle_bootstrap(connection, request, terminal_probe=True)
 
+        if got in {"/api/settings/integrations", "/api/settings/integrations/configure", "/api/settings/integrations/map"}:
+            return await self._handle_integrations(request, got)
+
         # Settings routes (delegated)
         response = await self.settings_routes.dispatch(connection, request, got)
         if response is not None:
@@ -921,6 +926,34 @@ class GatewayHTTPHandler:
         return _http_json_response({
             "tasks": [status.as_dict() for status in statuses.values()],
         }, extra_headers=_NO_STORE_HEADERS)
+
+    async def _handle_integrations(self, request: WsRequest, path: str) -> Response:
+        from nanobot.market.oanda import ProviderUnavailableError
+        from nanobot.trading.metaapi import ProviderRejectedError
+        from nanobot.webui.integration_settings import (
+            ConnectionUpdate,
+            MappingUpdate,
+            configure_connection,
+            configure_mapping,
+            integration_status,
+        )
+
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            if path == "/api/settings/integrations":
+                result = integration_status(self.settings.config.load())
+            else:
+                payload = _mutation_payload(request)
+                if payload is None:
+                    return _http_error(405, "Settings changes require authenticated WebSocket")
+                if path.endswith("/configure"):
+                    result = configure_connection(self.settings.config, ConnectionUpdate.model_validate(payload))
+                else:
+                    result = await configure_mapping(self.settings.config.load(), MappingUpdate.model_validate(payload))
+            return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
+        except (ValueError, ProviderUnavailableError, ProviderRejectedError):
+            return _http_error(400, "Connection update could not be completed")
 
     async def _handle_cloud_resource(self, request: WsRequest, path: str) -> Response:
         from nanobot.market.oanda import ProviderUnavailableError
