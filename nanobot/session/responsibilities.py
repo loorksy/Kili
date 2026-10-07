@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -18,6 +18,7 @@ from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.security.runtime_storage import internal_state_root
+from nanobot.session.wake_schedule import WakeSchedule
 from nanobot.utils.helpers import atomic_write_lines
 
 ResponsibilityState = Literal[
@@ -49,7 +50,7 @@ class WakeReceipt(BaseModel):
 
 class Responsibility(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    version: Literal[1, 2, 3] = 3
+    version: Literal[1, 2, 3, 4] = 4
     id: str = Field(pattern=r"^resp_[0-9a-f]{32}$")
     revision: int = 0
     objective: str = Field(min_length=1, max_length=4000)
@@ -62,6 +63,7 @@ class Responsibility(BaseModel):
     workspace_scope: dict[str, str] = Field(default_factory=dict)
     waiting_for: str | None = None
     next_wake_ms: int | None = None
+    schedule: WakeSchedule | None = None
     last_wake_ms: int | None = None
     checkpoint: ResponsibilityCheckpoint = Field(default_factory=ResponsibilityCheckpoint)
     parent_responsibility_id: str | None = None
@@ -112,6 +114,7 @@ class ResponsibilityStore:
         self.root = internal_state_root(create=True) / "responsibilities" / namespace
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._lock = FileLock(str(self.root / ".lock"))
+        self.on_change: Callable[[], None] | None = None
 
     def _path(self, responsibility_id: str) -> Path:
         import re
@@ -184,7 +187,7 @@ class ResponsibilityStore:
 
     def _commit(self, record: Responsibility) -> Responsibility:
         record = record.model_copy(deep=True)
-        record.version = 3
+        record.version = 4
         record.revision += 1
         record.updated_at_ms = int(time.time() * 1000)
         self._write(record)
@@ -193,6 +196,8 @@ class ResponsibilityStore:
     def _write(self, record: Responsibility) -> None:
         atomic_write_lines(self._path(record.id), [record.model_dump_json() + "\n"], fsync=True)
         self._path(record.id).chmod(0o600)
+        if self.on_change is not None:
+            self.on_change()
 
     def enqueue(self, responsibility_id: str, wake_id: str, content: str) -> bool:
         """Persist receipt before acknowledging an upstream delivery."""
@@ -271,6 +276,10 @@ class ResponsibilityStore:
                     record.state = "PAUSED"
             elif record.state == "RUNNING":
                 record.state = "WAITING"
+            if not uncertain and record.state == "WAITING" and record.schedule:
+                record.next_wake_ms = record.schedule.next_after(int(time.time() * 1000))
+                if record.next_wake_ms is not None:
+                    record.state = "SCHEDULED"
             self._commit(record)
 
     @staticmethod
@@ -347,7 +356,7 @@ class ResponsibilityStore:
                 atomic_write_lines(backup / path.name, [text], fsync=True)
                 (backup / path.name).chmod(0o600)
                 if not self._path(record.id).exists():
-                    record.version = 3
+                    record.version = 4
                     if record.active_wake_id or record.checkpoint.pending_tools:
                         self._interrupt(record)
                     self._write(record)

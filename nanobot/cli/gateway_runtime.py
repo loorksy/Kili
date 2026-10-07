@@ -2,6 +2,7 @@
 
 import asyncio
 import signal
+import time
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import suppress
 from pathlib import Path
@@ -852,6 +853,45 @@ def _run_gateway(
         # Cursor repair must not depend on a healthy cron store.
         _advance_dream_cursor_if_behind(agent.context.memory)
         cron.remove_system_job("dream")
+
+    async def _run_due_responsibilities() -> None:
+        await run_responsibility_wakes(
+            session_manager.responsibilities, submit_turn=agent.submit_cron_turn,
+            is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+            session_exists=lambda key: session_manager.get_existing(key) is not None,
+        )
+
+    def _nearest_responsibility_deadline() -> int | None:
+        deadlines: list[int] = []
+        for record in session_manager.responsibilities.list():
+            if (record.active_wake_id or record.recovery_required or record.delivery_needed
+                    or record.state in {"PAUSED", "COMPLETED", "FAILED", "CANCELLED", "WAITING_FOR_USER"}
+                    or not record.channel or channels.get_channel(record.channel) is None):
+                continue
+            if record.state == "SCHEDULED" and record.next_wake_ms is not None:
+                deadlines.append(record.next_wake_ms)
+            if any(w.state == "QUEUED" for w in record.wakes.values()):
+                deadlines.append(time.time_ns() // 1_000_000)
+        return min(deadlines) if deadlines else None
+
+    if config.tools.integrations.oanda:
+        import hashlib
+
+        from nanobot.market.oanda import OandaClient
+        from nanobot.market.watchers import MarketWatcher, MarketWatchers
+        from nanobot.session.records import RecordStore
+
+        namespace = hashlib.sha256(str(session_manager.workspace).encode()).hexdigest()
+        market_watchers = MarketWatchers(
+            OandaClient(config.tools.integrations.oanda), session_manager.responsibilities,
+            RecordStore("market_watchers:" + namespace, MarketWatcher),
+        )
+        cron.register_deadline_source("market_conditions", market_watchers.nearest,
+                                      market_watchers.run_due)
+
+    cron.register_deadline_source("responsibilities", _nearest_responsibility_deadline,
+                                  _run_due_responsibilities)
+    session_manager.responsibilities.on_change = cron.reschedule
 
     cron.register_system_job(CronJob(
         id=RESPONSIBILITY_CRON_ID,

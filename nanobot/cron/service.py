@@ -9,7 +9,6 @@ import uuid
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 from types import EllipsisType
 from typing import Any, Callable, Coroutine, Literal
@@ -18,6 +17,8 @@ from filelock import FileLock
 from loguru import logger
 
 from nanobot.cron.binding import CronBinding, CronBindingError, binding_revision
+from nanobot.cron.scheduling import compute_next_run as _compute_next_run
+from nanobot.cron.scheduling import validate_schedule as _validate_schedule_for_add
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import (
     CronJob,
@@ -40,60 +41,6 @@ class CronJobSkippedError(Exception):
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
-    """Compute next run time in ms."""
-    if schedule.kind == "at":
-        return schedule.at_ms if schedule.at_ms and schedule.at_ms > now_ms else None
-
-    if schedule.kind == "every":
-        if not schedule.every_ms or schedule.every_ms <= 0:
-            return None
-        # Next interval from now
-        return now_ms + schedule.every_ms
-
-    if schedule.kind == "cron" and schedule.expr:
-        try:
-            from zoneinfo import ZoneInfo
-
-            from croniter import croniter
-            # Use caller-provided reference time for deterministic scheduling
-            base_time = now_ms / 1000
-            tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
-            base_dt = datetime.fromtimestamp(base_time, tz=tz)
-            cron = croniter(schedule.expr, base_dt)
-            next_dt = cron.get_next(datetime)
-            return int(next_dt.timestamp() * 1000)
-        except Exception:
-            return None
-
-    return None
-
-
-def _validate_schedule_for_add(schedule: CronSchedule) -> None:
-    """Validate schedule fields that would otherwise create non-runnable jobs."""
-    if schedule.tz and schedule.kind != "cron":
-        raise ValueError("tz can only be used with cron schedules")
-    if schedule.kind == "every" and (schedule.every_ms is None or schedule.every_ms <= 0):
-        raise ValueError("every schedule requires a positive 'every_ms'")
-
-    if schedule.kind == "cron":
-        if not schedule.expr or not schedule.expr.strip():
-            raise ValueError("cron schedule requires a non-empty 'expr'")
-        try:
-            from croniter import croniter
-
-            croniter(schedule.expr)
-        except Exception as exc:
-            raise ValueError(f"invalid cron expression '{schedule.expr}': {exc}") from None
-        if schedule.tz:
-            try:
-                from zoneinfo import ZoneInfo
-
-                ZoneInfo(schedule.tz)
-            except Exception:
-                raise ValueError(f"unknown timezone '{schedule.tz}'") from None
 
 
 def _has_legacy_delivery_context(payload: CronPayload) -> bool:
@@ -195,6 +142,7 @@ class CronService:
         self._active_executions = 0
         self._store_dirty = False
         self.max_sleep_ms = max_sleep_ms
+        self._deadline_sources: dict[str, tuple[Callable[[], int | None], Callable[[], Coroutine[Any, Any, None]]]] = {}
 
     def _should_persist_store(self) -> bool:
         """Return whether this instance currently owns the live store."""
@@ -524,12 +472,25 @@ class CronService:
             if job.enabled:
                 job.state.next_run_at_ms = _compute_next_run(job.schedule, now)
 
+    def register_deadline_source(
+        self, name: str, nearest: Callable[[], int | None],
+        run_due: Callable[[], Coroutine[Any, Any, None]],
+    ) -> None:
+        """Attach durable due metadata to this scheduler, without a second timer."""
+        self._deadline_sources[name] = (nearest, run_due)
+        self.reschedule()
+
+    def reschedule(self) -> None:
+        """Wake/recalculate the existing timer when durable scheduling state changes."""
+        self._arm_timer()
+
     def _get_next_wake_ms(self) -> int | None:
-        """Get the earliest next run time across all jobs."""
-        if not self._store:
-            return None
         times = [j.state.next_run_at_ms for j in self._store.jobs
-                 if j.enabled and j.state.next_run_at_ms]
+                 if j.enabled and j.state.next_run_at_ms is not None] if self._store else []
+        for nearest, _ in self._deadline_sources.values():
+            due = nearest()
+            if due is not None:
+                times.append(due)
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
@@ -579,6 +540,10 @@ class CronService:
                 return
 
             now = _now_ms()
+            for nearest, run_due in tuple(self._deadline_sources.values()):
+                due = nearest()
+                if due is not None and due <= now:
+                    await run_due()
             due_jobs = [
                 j for j in store.jobs
                 if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms

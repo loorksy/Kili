@@ -130,6 +130,7 @@ class _GoalToolsMixin:
         if reset_continuation and responsibility_id:
             record.wake_generation += 1
             record.next_wake_ms = None
+            record.schedule = None
             record.waiting_for = None
         record.objective = blob["objective"]
         record.ui_summary = blob.get("ui_summary", "")
@@ -328,6 +329,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             nullable=True,
         ),
         responsibility_id=StringSchema("Stable responsibility ID; use list to find goals after chat reset.", nullable=True),
+        schedule_json=StringSchema("User schedule JSON: kind at/after/every/cron with at_ms, delay_ms, every_ms or expr/tz. Used with wait; recurrence is durable.", nullable=True),
         next_wake_ms=IntegerSchema(description="UTC Unix milliseconds for a scheduled wake. Used with wait.", nullable=True),
         waiting_for=StringSchema("Event condition, or 'user'. Used with wait; event wakes use a local trigger bound to this ID.", nullable=True),
         checkpoint_json=StringSchema("JSON object with completed_steps, pending_work, result_refs and artifacts arrays. Operational facts only; no hidden reasoning.", nullable=True),
@@ -379,6 +381,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         ui_summary: str | None = None,
         responsibility_id: str | None = None,
         next_wake_ms: int | None = None,
+        schedule_json: str | None = None,
         waiting_for: str | None = None,
         checkpoint_json: str | None = None,
         **kwargs: Any,
@@ -413,6 +416,12 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 if recap is not None:
                     record.progress = recap.strip()[:8000]
                 if action == "wait":
+                    import time
+
+                    from nanobot.session.wake_schedule import WakeSchedule
+                    record.schedule = WakeSchedule.model_validate_json(schedule_json) if schedule_json else None
+                    if record.schedule:
+                        next_wake_ms = record.schedule.first(int(time.time() * 1000))
                     if next_wake_ms is None and not waiting_for:
                         return ToolResult.error("Error: wait requires next_wake_ms or waiting_for.")
                     record.next_wake_ms = next_wake_ms

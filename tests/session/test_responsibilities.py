@@ -320,7 +320,7 @@ def test_draft_state_relocated_once_with_protected_backup(tmp_path):
     store.migrate_workspace_records()
     assert not source.exists()
     assert (store.root / "legacy-backup" / source.name).exists()
-    assert store.get(record.id).version == 3
+    assert store.get(record.id).version == 4
     assert store.get(record.id).state == "WAITING_FOR_EVENT"
     store.migrate_workspace_records()
     assert len(store.list()) == 1
