@@ -1355,3 +1355,19 @@ export function starPromptAction(
 ): Promise<{ show: boolean }> {
   return mutation<{ show: boolean }>(transport, `star_prompt.${action}`);
 }
+
+export function fetchCloudChart(token: string, chartId: string, sessionKey: string) {
+  return request<import("@/components/charts/contract").CloudChartState>(
+    `/api/webui/cloud-charts?chart_id=${encodeURIComponent(chartId)}&session_key=${encodeURIComponent(sessionKey)}`, token);
+}
+export function fetchChartCandles(token: string, chartId: string, sessionKey: string, before?: string) {
+  const query = new URLSearchParams({ chart_id: chartId, session_key: sessionKey, count: "500" });
+  if (before) query.set("before", before);
+  return request<{ candles: { time: string; open: string; high: string; low: string; close: string; volume: number | null }[]; data_revision: string }>(`/api/webui/cloud-charts/candles?${query}`, token);
+}
+export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: string, operation: Record<string, unknown>) {
+  return mutation<import("@/components/charts/contract").CloudChartState>(transport, "chart.update", { session_key: sessionKey, operation });
+}
+export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean) {
+  return mutation<{ id: string; status: string }>(transport, "approval.resolve", { session_key: sessionKey, approval_id: approvalId, approve });
+}

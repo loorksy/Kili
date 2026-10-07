@@ -199,6 +199,8 @@ _WEBUI_MUTATION_PATHS = {
     "workspace.pick_folder": "/api/workspaces/pick-folder",
     "recovery.continue": "/api/webui/recovery/continue",
     "recovery.dismiss": "/api/webui/recovery/dismiss",
+    "chart.update": "/api/webui/cloud-charts/update",
+    "approval.resolve": "/api/webui/action-approvals/resolve",
     "subagent.cancel": "/api/webui/subagents/cancel",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
@@ -615,6 +617,10 @@ class GatewayHTTPHandler:
         if response is not None:
             return response
 
+        if got in {"/api/webui/cloud-charts", "/api/webui/cloud-charts/candles",
+                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals/resolve"}:
+            return await self._handle_cloud_resource(request, got)
+
         # Recovery routes
         response = await self._dispatch_recovery_route(request, got)
         if response is not None:
@@ -915,6 +921,44 @@ class GatewayHTTPHandler:
         return _http_json_response({
             "tasks": [status.as_dict() for status in statuses.values()],
         }, extra_headers=_NO_STORE_HEADERS)
+
+    async def _handle_cloud_resource(self, request: WsRequest, path: str) -> Response:
+        from nanobot.market.oanda import ProviderUnavailableError
+        from nanobot.webui.cloud_resources import chart_snapshot, resolve_approval, update_chart
+
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        payload = _mutation_payload(request)
+        query = _parse_query(request.path)
+        principal = (payload or {}).get("session_key") if payload is not None else (query.get("session_key") or [""])[0]
+        if not isinstance(principal, str) or not is_webui_session_key(principal):
+            return _http_error(400, "Invalid conversation")
+        if self.session_manager is None or self.session_manager.get_existing(principal) is None:
+            return _http_error(404, "Conversation unavailable")
+        try:
+            if path.endswith("/resolve"):
+                if payload is None:
+                    return _http_error(405, "Approval requires authenticated WebSocket")
+                approval_id, approve = payload.get("approval_id"), payload.get("approve")
+                if not isinstance(approval_id, str) or not isinstance(approve, bool):
+                    return _http_error(400, "Invalid approval resolution")
+                result = resolve_approval(principal, approval_id, approve)
+            elif path.endswith("/update"):
+                if payload is None or not isinstance(payload.get("operation"), dict):
+                    return _http_error(400, "Invalid chart operation")
+                result = await update_chart(self.settings.config.load(), self.session_manager,
+                                            self.bus, principal, payload["operation"])
+            else:
+                chart_id = (query.get("chart_id") or [""])[0]
+                before = (query.get("before") or [None])[0]
+                count = int((query.get("count") or ["500"])[0])
+                result = await chart_snapshot(self.settings.config.load(), chart_id, principal,
+                                              candles=path.endswith("/candles"), before=before, count=count)
+            return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
+        except PermissionError:
+            return _http_error(403, "Resource is outside this scope")
+        except (ValueError, ProviderUnavailableError):
+            return _http_error(400, "Resource request could not be completed")
 
     async def _handle_subagent_cancel(self, request: WsRequest) -> Response:
         if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):

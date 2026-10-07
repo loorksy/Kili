@@ -37,6 +37,7 @@ class Action(BaseModel):
     action_class: ActionClass
     parameters: dict[str, JsonValue]
     principal: str
+    responsibility_id: str | None = None
     policy_version: str = "1"
 
     @property
@@ -266,7 +267,9 @@ class ActionPolicy:
         approval = store.request(action)
         return (f"Waiting for approval: {approval.id}. {review.reason}. "
                 f"User: /approve {approval.id} or /deny {approval.id}. "
-                f"Action: {json.dumps(action.parameters, sort_keys=True)}")
+                f"Action: {json.dumps(action.parameters, sort_keys=True)}\n"
+                "```action_approval\n" + json.dumps({"approval_id": approval.id,
+                    "session_key": action.principal, "action": action.parameters}) + "\n```")
 
 
 class ProviderAutoReviewer:

@@ -115,13 +115,13 @@ class OandaClient:
         return parse_provider(_Instruments, data).instruments
 
     @staticmethod
-    def _symbol(symbol: str) -> None:
+    def validate_symbol(symbol: str) -> None:
         import re
         if not re.fullmatch(r"[A-Z0-9_]{3,40}", symbol):
             raise ValueError("Invalid OANDA instrument")
 
     async def quote(self, symbol: str, canonical: str) -> Quote:
-        self._symbol(symbol)
+        self.validate_symbol(symbol)
         data = await self._get(f"/v3/accounts/{self.connection.account_id}/pricing", {"instruments": symbol})
         prices = parse_provider(_Prices, data).prices
         price = next((p for p in prices if p.instrument == symbol), None)
@@ -133,7 +133,7 @@ class OandaClient:
 
     async def candles(self, symbol: str, canonical: str, timeframe: str, *, count: int = 500,
                       before: str | None = None, price: Literal["M"] = "M") -> list[Candle]:
-        self._symbol(symbol)
+        self.validate_symbol(symbol)
         if timeframe not in GRANULARITIES or not 1 <= count <= 5000:
             raise ValueError("Unsupported candle timeframe or count")
         params = {"granularity": timeframe, "count": str(count), "price": price}

@@ -161,3 +161,11 @@ def _event_content(event: AgentEvent) -> str:
             return "Context compaction cancelled."
         return "Context compacted."
     return ""
+
+
+@dataclass(frozen=True)
+class CloudChartChanged(AgentEvent):
+    """Revision-only projection; clients load authenticated snapshots/history."""
+    chart_id: str
+    revision: int
+    annotation_revision: int

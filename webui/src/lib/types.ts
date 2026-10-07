@@ -1536,6 +1536,13 @@ export type InboundEvent =
       goal_state: GoalStateWsPayload;
     }
   | {
+      event: "cloud_chart_updated";
+      chat_id: string;
+      chart_id: string;
+      revision: number;
+      annotations_revision: number;
+    }
+  | {
       event: "session_updated";
       chat_id: string;
       scope?: "metadata" | "thread" | string;

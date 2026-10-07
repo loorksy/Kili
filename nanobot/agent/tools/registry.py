@@ -214,6 +214,7 @@ class ToolRegistry:
         action = Action.model_validate({
             "tool": tool.name, "action_class": tool.action_class,
             "parameters": params, "principal": principal,
+            "responsibility_id": next(iter(ctx.responsibility_scope.executions), None) if ctx else None,
         })
         refusal = await self.policy.authorize(action)
         if refusal:

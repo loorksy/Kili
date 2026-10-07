@@ -1,0 +1,70 @@
+import { useEffect, useRef, useState } from "react";
+import type { Datafeed } from "@klinecharts/pro";
+import { useClient } from "@/providers/ClientProvider";
+import { fetchCloudChart, fetchChartCandles, updateCloudChart } from "@/lib/api";
+import { parseChartReference, type CloudChartState } from "./contract";
+import { mountCloudChart } from "./pro-adapter";
+
+export function CloudChart({ reference }: { reference: string }) {
+  const parsed = parseChartReference(reference);
+  const chartId = parsed?.chart_id;
+  const sessionKey = parsed?.session_key;
+  const { client, token } = useClient();
+  const [chart, setChart] = useState<CloudChartState | null>(null);
+  const [error, setError] = useState("");
+  const [price, setPrice] = useState("");
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!chartId || !sessionKey) return;
+    let active = true;
+    const load = () => fetchCloudChart(token, chartId, sessionKey).then(value => { if (active) { setChart(value); setError(""); } })
+      .catch(() => { if (active) setError("Chart unavailable. Reconnect and try again."); });
+    void load();
+    const refresh = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail?.chart_id === chartId) void load();
+    };
+    window.addEventListener("nanobot-cloud-chart-updated", refresh);
+    window.addEventListener("online", load);
+    return () => { active = false; window.removeEventListener("nanobot-cloud-chart-updated", refresh); window.removeEventListener("online", load); };
+  }, [chartId, sessionKey, token]);
+  useEffect(() => {
+    if (!chart || !container.current || !chartId || !sessionKey) return;
+    let closed = false;
+    const feed: Datafeed = {
+      searchSymbols: async () => [{ ticker: chart.provider_instrument, name: chart.canonical_instrument }],
+      getHistoryKLineData: async (_symbol, _period, _from, to) => {
+        const page = await fetchChartCandles(token, chartId, sessionKey, new Date(to).toISOString());
+        if (closed) return [];
+        return page.candles.map(c => ({ timestamp: Date.parse(c.time), open: Number(c.open), high: Number(c.high),
+          low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 }));
+      },
+      subscribe: () => {}, unsubscribe: () => {},
+    };
+    const destroy = mountCloudChart(container.current, chart, feed);
+    return () => { closed = true; destroy(); };
+  }, [chart, chartId, sessionKey, token]);
+  async function change(operation: Record<string, unknown>) {
+    if (!chart || !sessionKey) return;
+    try {
+      const updated = await updateCloudChart(client, sessionKey, { ...operation, chart_id: chart.id, expected_revision: chart.revision });
+      setChart(updated); setError("");
+    } catch { setError("Chart changed or is unavailable. Reopen it before editing."); }
+  }
+  if (!parsed) return <p>Invalid chart reference.</p>;
+  return <section className="my-3 min-w-0 overflow-hidden rounded-xl border border-border bg-background" aria-label="Persistent market chart">
+    <div className="flex flex-wrap items-center gap-2 p-2 text-xs">
+      <span>{chart?.canonical_instrument ?? "Loading chart…"}</span>
+      <span className="text-muted-foreground">OANDA</span>
+      {chart && <select aria-label="Chart timeframe" value={chart.timeframe} onChange={e => void change({ operation: "set_timeframe", timeframe: e.target.value })}>
+        {["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"].map(tf => <option key={tf}>{tf}</option>)}
+      </select>}
+    </div>
+    {error && <p className="p-2 text-xs text-destructive" role="status">{error}</p>}
+    <div ref={container} className="h-[360px] w-full min-w-0 sm:h-[440px]" />
+    <div className="flex flex-wrap gap-2 p-2 text-xs">
+      <input aria-label="Annotation price" className="w-28 rounded border bg-background px-2" value={price} onChange={e => setPrice(e.target.value)} placeholder="Price" />
+      <button disabled={!chart || !/^[0-9]+(?:\.[0-9]+)?$/.test(price)} onClick={() => void change({ operation: "add_annotation", annotation_type: "horizontal_line", points: [{ value: price }], text: "User price level" })}>Save price level</button>
+      {chart?.annotations.map(a => <span key={a.id} className="text-muted-foreground" title={a.created_by}>{a.text || a.type}</span>)}
+    </div>
+  </section>;
+}

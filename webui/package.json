@@ -13,6 +13,7 @@
     "lint": "cd .. && eslint --config webui/eslint.config.js webui/src \"nanobot/channels/*/webui/**/*.{ts,tsx}\" \"nanobot/channels/*/tests/webui/**/*.{ts,tsx}\" --max-warnings 0"
   },
   "dependencies": {
+    "@klinecharts/pro": "0.1.1",
     "@radix-ui/react-alert-dialog": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.4",
     "@radix-ui/react-dropdown-menu": "^2.1.4",
@@ -25,6 +26,7 @@
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "i18next": "^26.0.6",
+    "klinecharts": "9.8.12",
     "lucide-react": "^0.469.0",
     "micromark-factory-space": "^2.0.1",
     "qrcode": "^1.5.4",

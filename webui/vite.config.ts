@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { klineProLifecycle } from "./kline-pro-adapter-plugin";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
@@ -119,7 +120,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
-    plugins: [react(), guardWebuiEntryChunk(), gzipWebuiAssets()],
+    plugins: [klineProLifecycle(), react(), guardWebuiEntryChunk(), gzipWebuiAssets()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -129,6 +130,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ["react", "react-dom", "lucide-react", "react-i18next", "qrcode"],
     },
     optimizeDeps: {
+      exclude: ["@klinecharts/pro"],
       // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
       // it splits its layer/focus state from optimized Popover and DropdownMenu,
       // so nested overlays can dismiss the wrong layer in development.

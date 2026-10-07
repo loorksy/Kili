@@ -1266,6 +1266,11 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "cloud_chart_updated") {
+      window.dispatchEvent(new CustomEvent("nanobot-cloud-chart-updated", { detail: parsed }));
+      return;
+    }
+
     if (parsed.event === "session_updated") {
       this.emitSessionUpdate(parsed.chat_id, parsed.scope, parsed.workspace_scope);
       return;

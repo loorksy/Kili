@@ -1,5 +1,7 @@
 import {
   Children,
+  lazy,
+  Suspense,
   isValidElement,
   useEffect,
   useMemo,
@@ -40,6 +42,8 @@ import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
 import "streamdown/styles.css";
+const LazyActionApproval = lazy(() => import("@/components/charts/ActionApproval").then(module => ({ default: module.ActionApproval })));
+const LazyCloudChart = lazy(() => import("@/components/charts/CloudChart").then(module => ({ default: module.CloudChart })));
 
 interface MarkdownTextRendererProps {
   children: string;
@@ -511,7 +515,7 @@ function useFaviconFallback(host: string) {
 function isRenderedCodeBlock(value: ReactNode): boolean {
   if (!isValidElement(value)) return false;
   const props = value.props as { code?: unknown };
-  return value.type === CodeBlock || typeof props.code === "string";
+  return value.type === CodeBlock || value.type === Suspense || typeof props.code === "string";
 }
 
 function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
@@ -560,6 +564,12 @@ export default function MarkdownTextRenderer({
         const match = /language-(\w+)/.exec(cls || "");
         if (match) {
           const code = String(kids).replace(/\n$/, "");
+          if (match[1] === "action_approval") {
+            return <Suspense fallback={<p>Loading approval…</p>}><LazyActionApproval reference={code} /></Suspense>;
+          }
+          if (match[1] === "trading_chart") {
+            return <Suspense fallback={<p>Loading chart…</p>}><LazyCloudChart reference={code} /></Suspense>;
+          }
           return (
             <CodeBlock
               language={match[1]}
@@ -616,6 +626,8 @@ export default function MarkdownTextRenderer({
         }
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
+          if (fence.language === "trading_chart") return <Suspense fallback={<p>Loading chart…</p>}><LazyCloudChart reference={fence.code} /></Suspense>;
+          if (fence.language === "action_approval") return <Suspense fallback={<p>Loading approval…</p>}><LazyActionApproval reference={fence.code} /></Suspense>;
           return (
             <CodeBlock
               language={fence.language || "text"}

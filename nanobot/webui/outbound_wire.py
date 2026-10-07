@@ -108,7 +108,16 @@ class SubagentTaskWirePayload(_ChatWirePayload):
     task: dict[str, object]
 
 
+class CloudChartWirePayload(TypedDict):
+    event: Literal["cloud_chart_updated"]
+    chat_id: str
+    chart_id: str
+    revision: int
+    annotations_revision: int
+
+
 WebUIWirePayload: TypeAlias = (
+    CloudChartWirePayload |
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
     | SubagentTaskWirePayload
 )

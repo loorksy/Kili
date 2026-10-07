@@ -8,6 +8,7 @@ from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import (
+    CloudChartChanged,
     ContextCompactionEvent,
     GoalStateSyncEvent,
     GoalStatusEvent,
@@ -245,6 +246,14 @@ class WebUIOutboundProjector:
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self._transport.send_session_updated(msg.chat_id, scope=session_update_scope)
+            return
+        if isinstance(event, CloudChartChanged):
+            if conns:
+                await self._transport.send_payload(msg.chat_id, {
+                    "event": "cloud_chart_updated", "chat_id": msg.chat_id,
+                    "chart_id": event.chart_id, "revision": event.revision,
+                    "annotations_revision": event.annotation_revision,
+                }, persistence="transient")
             return
         if isinstance(event, SubagentTaskChanged):
             if conns:

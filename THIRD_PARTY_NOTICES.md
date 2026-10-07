@@ -177,3 +177,13 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## KLineChart Pro and KLineCharts — interactive Cloud Chart (Apache-2.0)
+
+- Source: https://github.com/klinecharts/pro and https://github.com/klinecharts/KLineChart
+- Pinned npm releases: `@klinecharts/pro@0.1.1`, `klinecharts@9.8.12`; integrity hashes are in `webui/package-lock.json`.
+- Bundled only in the lazy Cloud Chart client chunk. No Polygon datafeed is used.
+- Nanobot modification: the checksum-verified bundling transform in `webui/kline-pro-adapter-plugin.ts`
+  retains Solid's disposer and adds `destroy()`. Installed package files remain unchanged.
+- Original copyright/license notices are retained in the packages. Apache-2.0 license:
+  https://www.apache.org/licenses/LICENSE-2.0
