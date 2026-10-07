@@ -647,6 +647,13 @@ class AgentLoop:
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_control=AgentRuntimeControl(self),
         )
+        if self.tools_config.action_review_model:
+            from nanobot.security.actions import ProviderAutoReviewer
+
+            runtime = self.runtime_resolver.runtime
+            self.tools.policy.reviewer = ProviderAutoReviewer(
+                runtime.provider, self.tools_config.action_review_model,
+            )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
 
@@ -876,10 +883,10 @@ class AgentLoop:
             try:
                 for turn_scope in ctx.turn_scopes:
                     turn_scope_stack.enter_context(turn_scope)
-                result = await tool.execute(
-                    command=ctx.args.strip(),
-                    working_dir=str(scope.project_path),
-                )
+                result = await self.tools.execute("exec", {
+                    "command": ctx.args.strip(),
+                    "working_dir": str(scope.project_path),
+                })
                 content = str(result)
             finally:
                 turn_scope_stack.close()

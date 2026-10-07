@@ -938,6 +938,9 @@ def _run_gateway(
         try:
             migrate_session_goals(session_manager)
             session_manager.responsibilities.recover()
+            from nanobot.security.actions import ActionStore
+
+            ActionStore().recover()
             await cron.start()
             # Re-read once on first admission to close the watcher subscription window.
             agent.runtime_resolver.invalidate()

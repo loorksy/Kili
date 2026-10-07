@@ -17,6 +17,7 @@ from nanobot import __version__
 from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
 from nanobot.providers.base import LLMUsage
+from nanobot.security.actions import ActionStore
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
@@ -67,6 +68,8 @@ class BuiltinCommandSpec:
 
 
 BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
+    BuiltinCommandSpec("/approve", "Approve action", "Approve the exact requested action.", "check", "<id>", accepts_args=True),
+    BuiltinCommandSpec("/deny", "Deny action", "Deny the requested action.", "x", "<id>", accepts_args=True),
     BuiltinCommandSpec(
         "/new",
         "New chat",
@@ -1064,8 +1067,26 @@ def build_help_text() -> str:
     return "\n".join(lines)
 
 
+async def cmd_action_approval(ctx: CommandContext) -> OutboundMessage:
+    """User interaction only. The backend journal owns every transition."""
+    if not ctx.is_user_turn:
+        content = "Only a user message can resolve an approval."
+    else:
+        try:
+            record = ActionStore().resolve(
+                ctx.args.strip(), principal=ctx.key,
+                approve=ctx.raw.strip().split()[0] == "/approve",
+            )
+            content = f"Action {record.status.lower()}: {record.id}."
+        except (ValueError, PermissionError) as exc:
+            content = str(exc)
+    return OutboundMessage(channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content)
+
+
 def register_builtin_commands(router: CommandRouter) -> None:
     """Register the default set of slash commands."""
+    router.prefix("/approve ", cmd_action_approval)
+    router.prefix("/deny ", cmd_action_approval)
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)

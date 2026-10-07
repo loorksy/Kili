@@ -6,7 +6,7 @@ import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
@@ -185,6 +185,9 @@ class ToolResult(str):
 
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
+
+    # Static gateway classification, never controlled by model parameters.
+    action_class: Literal["local", "read", "consequential", "forbidden"] = "local"
 
     _TYPE_MAP = _JSON_TYPE_MAP
     _BOOL_TRUE = frozenset(("true", "1", "yes"))

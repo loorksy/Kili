@@ -64,6 +64,12 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(
     scope = SimpleNamespace(project_path=tmp_path)
     loop = MagicMock()
     loop.tools.get.return_value = tool
+
+    async def execute_registered(name, params):
+        assert name == "exec"
+        return await tool.execute(**params)
+
+    loop.tools.execute = AsyncMock(side_effect=execute_registered)
     loop.sessions.get_or_create.return_value = session
     loop.workspace_scopes.for_turn.return_value = scope
     ctx = _context(loop, trusted=True)
@@ -72,6 +78,7 @@ async def test_user_shell_uses_exec_tool_with_workspace_scope(
 
     response = await AgentLoop.execute_user_shell_command(loop, ctx)
 
+    loop.tools.execute.assert_awaited_once_with("exec", {"command": "pwd", "working_dir": str(tmp_path)})
     tool.execute.assert_awaited_once_with(command="pwd", working_dir=str(tmp_path))
     assert response.content.endswith("Exit code: 0")
     assert response.metadata["render_as"] == "text"

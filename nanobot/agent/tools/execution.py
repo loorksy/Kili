@@ -170,7 +170,7 @@ async def _execute_tool_call(
             if tool_call.name == "read_file" else nullcontext()
         ):
             if tool is not None:
-                result = await tool.execute(**params)
+                result = await tools.execute_prepared(tool, params)
             else:
                 result = await tools.execute(tool_call.name, params)
     except asyncio.CancelledError:

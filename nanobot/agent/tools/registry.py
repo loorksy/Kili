@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
+from nanobot.security.actions import Action, ActionPolicy
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -23,7 +24,8 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
-    def __init__(self):
+    def __init__(self, policy: ActionPolicy | None = None):
+        self.policy = policy or ActionPolicy()
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
 
@@ -193,12 +195,34 @@ class ToolRegistry:
 
         try:
             assert tool is not None  # guarded by prepare_call()
-            result = await tool.execute(**params)
+            result = await self.execute_prepared(tool, params)
             if is_tool_error_result(result):
                 return ToolResult.error(str(result) + hint)
             return result
         except Exception as e:
             return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
+
+    async def execute_prepared(self, tool: Tool, params: dict[str, Any]) -> Any:
+        """The only gateway invocation boundary, including runner-prepared calls."""
+        ctx = current_request_context()
+        if ctx and ctx.responsibility_scope.executions:
+            if ctx.responsibility_scope.closed:
+                return ToolResult.error("Execution ownership is closed")
+            for execution in ctx.responsibility_scope.executions.values():
+                execution.store.assert_owner(execution.claim)
+        principal = (ctx.session_key or f"{ctx.channel}:{ctx.chat_id}") if ctx else "gateway"
+        action = Action.model_validate({
+            "tool": tool.name, "action_class": tool.action_class,
+            "parameters": params, "principal": principal,
+        })
+        refusal = await self.policy.authorize(action)
+        if refusal:
+            return ToolResult.error(refusal)
+        # Review may await a remote provider. Recheck fencing before side effects.
+        if ctx:
+            for execution in ctx.responsibility_scope.executions.values():
+                execution.store.assert_owner(execution.claim)
+        return await tool.execute(**params)
 
     @property
     def tool_names(self) -> list[str]:
