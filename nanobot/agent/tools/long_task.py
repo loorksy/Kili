@@ -419,7 +419,9 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                     record.wake_generation += 1
                     record.waiting_for = waiting_for
                     record.state = "SCHEDULED" if next_wake_ms is not None else (
-                        "WAITING_FOR_USER" if waiting_for == "user" else "WAITING_FOR_EVENT")
+                        "WAITING_FOR_USER" if waiting_for == "user" else (
+                            "WAITING_FOR_SUBAGENT" if waiting_for and waiting_for.startswith("subagent:")
+                            else "WAITING_FOR_EVENT"))
                 elif action == "pause":
                     record.state = "PAUSED"
                     record.next_wake_ms = None

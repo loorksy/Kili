@@ -26,8 +26,11 @@ from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
+    ResponsibilityExecution,
+    ResponsibilityExecutionScope,
     ToolContext,
     bind_request_context,
+    current_request_context,
     reset_request_context,
 )
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -45,9 +48,11 @@ from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.security.workspace_access import (
     WorkspaceScope,
     bind_workspace_scope,
+    build_workspace_scope,
     reset_workspace_scope,
     workspace_sandbox_status,
 )
+from nanobot.security.workspace_collaboration import WorkspaceCollaboration
 from nanobot.session.manager import Session, SessionManager, SessionPolicy
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
@@ -97,6 +102,8 @@ class _SubagentTask:
     origin_message_id: str | None = None
     workspace_scope: WorkspaceScope | None = None
     announce: bool = True
+    parent_responsibility_id: str | None = None
+    durable_execution: ResponsibilityExecution | None = None
     begun: bool = False
     suppress_notice: bool = False
     inbox: list[tuple[str, str]] = field(default_factory=list)
@@ -304,6 +311,12 @@ class SubagentManager:
         """Recover observations only after the host has claimed execution ownership."""
         if self.sessions is not None:
             self.sessions.interrupt_pending()
+            store = self.sessions.sessions.responsibilities
+            for child in store.list():
+                if child.parent_responsibility_id and child.recovery_required:
+                    store.enqueue(child.parent_responsibility_id,
+                                  f"subagent-interrupted:{child.delegation_id}",
+                                  f"Delegated work was interrupted; inspect {child.id} before retrying.")
 
     def _start_cleanup(self, record: _SubagentTask, *, retry: bool = False) -> asyncio.Task[int]:
         cleanup = record.cleanup_task
@@ -329,6 +342,23 @@ class SubagentManager:
     def _finish(self, record: _SubagentTask,
                 cleanup_error: str | None = None) -> _SubagentOutcome:
         outcome = record.finish(self.max_tool_result_chars, cleanup_error)
+        durable = record.durable_execution
+        if durable is not None:
+            child = durable.store.assert_owner(durable.claim)
+            child.result_summary = outcome.result[:self.max_tool_result_chars]
+            child.checkpoint.result_refs = [f"subagent:{record.status.task_id}"]
+            child.state = "COMPLETED" if outcome.state == "done" else (
+                "CANCELLED" if outcome.state == "cancelled" else "FAILED")
+            durable.store.save(child, claim=durable.claim)
+            durable.store.finish(durable.claim)
+            record.durable_execution = None
+            parent_id = child.parent_responsibility_id
+            if parent_id:
+                parent = durable.store.get(parent_id)
+                if parent.execution_generation == child.parent_execution_generation:
+                    durable.store.enqueue(parent_id, f"subagent:{record.status.task_id}",
+                                          f"Subagent {record.status.task_id} {outcome.state}. "
+                                          f"Result reference: {child.id}. {child.result_summary}")
         self._save_status(record.status, fsync=True)
         self._terminal_statuses[record.status.task_id] = record.snapshot()
         while len(self._terminal_statuses) > self.MAX_TERMINAL:
@@ -554,6 +584,23 @@ class SubagentManager:
             workspace_scope=workspace_scope,
             announce=announce,
         )
+        request = current_request_context()
+        if request and request.responsibility_scope.executions and child.policy.persist:
+            if request.responsibility_scope.closed:
+                raise SubagentControlError("Parent execution is closed")
+            parent_execution = next(iter(request.responsibility_scope.executions.values()))
+            parent = parent_execution.store.assert_owner(parent_execution.claim)
+            delegated = parent_execution.store.create(objective=task, session_key=None,
+                                                      channel="", chat_id="", ui_summary=status.label)
+            delegated.parent_responsibility_id = parent.id
+            delegated.parent_execution_generation = parent.execution_generation
+            delegated.delegation_id = task_id
+            delegated = parent_execution.store.control_update(delegated)
+            claim = parent_execution.store.claim_foreground(delegated.id)
+            record.parent_responsibility_id = parent.id
+            record.durable_execution = ResponsibilityExecution(parent_execution.store, claim, foreground=False)
+            private = WorkspaceCollaboration(self.workspace).worker(task_id)
+            record.workspace_scope = build_workspace_scope(private, "restricted")
         self._tasks[task_id] = record
         self._publish_status(status)
         execution = asyncio.create_task(self._run_subagent(record))
@@ -678,7 +725,8 @@ class SubagentManager:
             )
             cleanup_error = f"Error cleaning up task processes: {exc}"
         outcome = self._finish(record, cleanup_error)
-        if record.announce and not record.suppress_notice and not self._closed:
+        if (record.announce and not record.suppress_notice and not self._closed
+                and record.parent_responsibility_id is None):
             await self._announce_result(
                 status.task_id, label, task_text, outcome.result, record.origin,
                 "ok" if outcome.state == "done" else outcome.state, record.origin_message_id,
@@ -699,6 +747,9 @@ class SubagentManager:
 
         async def _on_checkpoint(payload: dict[str, Any]) -> None:
             record.raise_if_stopping()
+            if record.durable_execution:
+                execution = record.durable_execution
+                execution.store.checkpoint_tools(execution.claim, payload, record.session.key)
             phase = payload.get("phase", status.phase)
             iteration = payload.get("iteration", status.iteration)
             if (phase, iteration) != (status.phase, status.iteration):
@@ -755,6 +806,10 @@ class SubagentManager:
             runtime=runtime,
             log_content=record.session.policy.log_content,
             persist_session=record.session.policy.persist,
+            responsibility_scope=ResponsibilityExecutionScope(executions=(
+                {record.durable_execution.claim.responsibility_id: record.durable_execution}
+                if record.durable_execution else {}
+            )),
         ))
         token = bind_workspace_scope(workspace_scope) if workspace_scope is not None else None
         try:

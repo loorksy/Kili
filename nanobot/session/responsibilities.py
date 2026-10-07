@@ -49,7 +49,7 @@ class WakeReceipt(BaseModel):
 
 class Responsibility(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    version: Literal[1, 2] = 2
+    version: Literal[1, 2, 3] = 3
     id: str = Field(pattern=r"^resp_[0-9a-f]{32}$")
     revision: int = 0
     objective: str = Field(min_length=1, max_length=4000)
@@ -64,6 +64,10 @@ class Responsibility(BaseModel):
     next_wake_ms: int | None = None
     last_wake_ms: int | None = None
     checkpoint: ResponsibilityCheckpoint = Field(default_factory=ResponsibilityCheckpoint)
+    parent_responsibility_id: str | None = None
+    parent_execution_generation: int | None = None
+    delegation_id: str | None = None
+    result_summary: str = ""
     delivery_needed: bool = False
     execution_generation: int = 0
     execution_token: str | None = None
@@ -180,7 +184,7 @@ class ResponsibilityStore:
 
     def _commit(self, record: Responsibility) -> Responsibility:
         record = record.model_copy(deep=True)
-        record.version = 2
+        record.version = 3
         record.revision += 1
         record.updated_at_ms = int(time.time() * 1000)
         self._write(record)
@@ -343,7 +347,7 @@ class ResponsibilityStore:
                 atomic_write_lines(backup / path.name, [text], fsync=True)
                 (backup / path.name).chmod(0o600)
                 if not self._path(record.id).exists():
-                    record.version = 2
+                    record.version = 3
                     if record.active_wake_id or record.checkpoint.pending_tools:
                         self._interrupt(record)
                     self._write(record)
