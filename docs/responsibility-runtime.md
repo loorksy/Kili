@@ -114,6 +114,10 @@ resume schedules a new generation instead of reusing the uncertain occurrence.
 
 Foreground chat work also claims ownership. Its capability survives through
 turn persistence and is released on completion; exceptions preserve uncertainty.
+Closing a turn retains its old immutable claims and closes the backend scope,
+so late callbacks cannot acquire a fresh claim. Only a new host-owned turn can
+start a new scope. Replacing the objective invalidates queued schedule
+generations and clears the old deadline before further work is admitted.
 Normal conversation reads after recovery do not overwrite the pending-tool
 checkpoint merely by opening or chatting in the linked session.
 
@@ -174,7 +178,7 @@ replay of uncertain work; it does not claim exactly-once external side effects.
 
 ## Verification of the hardened foundation
 
-The final selected Python regression run passed **1,665 tests**, with **41
+The final selected Python regression run passed **1,667 tests**, with **41
 platform-specific skips** and no failures. It covered all `tests/session`,
 `tests/cron`, `tests/triggers`, `tests/tools`, `tests/apps`, plus long-task tools,
 loop recovery/runner integration, Dream, existing subagents/lifecycle, gateway
@@ -186,7 +190,8 @@ restart/wait survival, overdue native cron execution through the real AgentLoop
 with a deterministic provider, duplicate trigger delivery, stable schedule
 receipts, session deletion/rebinding, workspace-state relocation/backup,
 N-to-N+1 takeover and stale writes after latest-record reload, stale goal-tool
-contexts, and real file/shell/CLI/MCP storage-denial tests. Public-URL guard unit
+contexts, late callbacks after turn closure, queued schedules after objective
+replacement, and real file/shell/CLI/MCP storage-denial tests. Public-URL guard unit
 tests use deterministic public DNS fixtures; they do not disable SSRF checks or
 claim external connectivity.
 

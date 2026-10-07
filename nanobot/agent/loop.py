@@ -762,7 +762,7 @@ class AgentLoop:
         claim = ctx.msg.responsibility_claim
         if claim is not None:
             store.assert_owner(claim)
-            request.responsibility_executions[claim.responsibility_id] = ResponsibilityExecution(store, claim, foreground=False)
+            request.responsibility_scope.executions[claim.responsibility_id] = ResponsibilityExecution(store, claim, foreground=False)
         else:
             self._claim_session_responsibility(request, ctx.session)
         return request
@@ -771,13 +771,13 @@ class AgentLoop:
         from nanobot.session.responsibilities import TERMINAL_STATES
         goal = parse_goal_state(goal_state_raw(session.metadata))
         responsibility_id = (goal or {}).get("responsibility_id")
-        if not isinstance(responsibility_id, str) or responsibility_id in request.responsibility_executions:
+        if not isinstance(responsibility_id, str) or responsibility_id in request.responsibility_scope.executions:
             return
         store = self.sessions.responsibilities
         record = store.get(responsibility_id)
         if record.state not in TERMINAL_STATES and not record.recovery_required:
             claim = store.claim_foreground(record.id)
-            request.responsibility_executions[record.id] = ResponsibilityExecution(store, claim)
+            request.responsibility_scope.executions[record.id] = ResponsibilityExecution(store, claim)
 
     async def _resolve_runtime_context_for_turn(
         self,
@@ -2262,7 +2262,7 @@ class AgentLoop:
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
         if ctx.request_context is not None:
-            for execution in ctx.request_context.responsibility_executions.values():
+            for execution in ctx.request_context.responsibility_scope.executions.values():
                 record = execution.store.assert_owner(execution.claim)
                 session.metadata["goal_state"] = record.goal_projection()
 
@@ -2555,7 +2555,7 @@ class AgentLoop:
         """Persist the latest in-flight turn state into session metadata."""
         request = current_request_context()
         if request is not None:
-            for execution in request.responsibility_executions.values():
+            for execution in request.responsibility_scope.executions.values():
                 execution.store.checkpoint_tools(execution.claim, payload, session.key)
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save_runtime_checkpoint(session)

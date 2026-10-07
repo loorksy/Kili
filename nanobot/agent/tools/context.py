@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
@@ -35,11 +35,23 @@ class ResponsibilityExecution:
     foreground: bool = True
 
 
+@dataclass
+class ResponsibilityExecutionScope:
+    executions: dict[str, ResponsibilityExecution] = field(default_factory=dict)
+    closed: bool = False
+
+
 def finish_responsibility_executions(ctx: RequestContext, *, uncertain: bool = False) -> None:
-    for responsibility_id, execution in list(ctx.responsibility_executions.items()):
-        if execution.foreground:
-            execution.store.finish(execution.claim, uncertain=uncertain)
-            del ctx.responsibility_executions[responsibility_id]
+    scope = ctx.responsibility_scope
+    if scope.closed:
+        return
+    try:
+        for execution in scope.executions.values():
+            if execution.foreground:
+                execution.store.finish(execution.claim, uncertain=uncertain)
+    finally:
+        # Retain immutable claims: late callbacks cannot acquire fresh ownership.
+        scope.closed = True
 
 
 @dataclass(frozen=True)
@@ -61,7 +73,7 @@ class RequestContext:
     can_receive_background_results: bool = True
     persist_session: bool = True
     # Backend-only capabilities, never part of model-visible metadata.
-    responsibility_executions: dict[str, ResponsibilityExecution] = field(default_factory=dict)
+    responsibility_scope: ResponsibilityExecutionScope = field(default_factory=ResponsibilityExecutionScope)
 
 
 @runtime_checkable
@@ -81,6 +93,10 @@ def reset_request_context(token: Token[RequestContext | None]) -> None:
 @contextmanager
 def request_context(ctx: RequestContext):
     """Bind one immutable request snapshot and restore the previous value."""
+    # Reusing an adapter snapshot starts a new host-owned turn, not a refresh
+    # inside an old running callback. Existing active claims remain unchanged.
+    if ctx.responsibility_scope.closed:
+        ctx = replace(ctx, responsibility_scope=ResponsibilityExecutionScope())
     token = bind_request_context(ctx)
     try:
         yield ctx

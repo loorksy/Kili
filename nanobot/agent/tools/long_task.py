@@ -39,6 +39,7 @@ from nanobot.session.responsibilities import (
     ExecutionClaim,
     ResponsibilityCheckpoint,
     ResponsibilityState,
+    StaleExecutionError,
 )
 from nanobot.session.turn_continuation import reset_goal_continuation_rounds
 from nanobot.utils.prompt_templates import render_template
@@ -77,10 +78,12 @@ class _GoalToolsMixin:
         request_ctx = current_request_context()
         if request_ctx is None:
             return None
+        if request_ctx.responsibility_scope.closed:
+            raise StaleExecutionError("Responsibility execution scope has ended")
         key = request_ctx.session_key
         if not key:
             return None
-        if request_ctx.responsibility_executions:
+        if request_ctx.responsibility_scope.executions:
             return self._sessions.get_existing(key)
         return self._sessions.get_or_create(key)
 
@@ -91,11 +94,13 @@ class _GoalToolsMixin:
         rc = current_request_context()
         if rc is None:
             raise RuntimeError("Responsibility execution requires backend request context")
-        if responsibility_id not in rc.responsibility_executions:
+        if rc.responsibility_scope.closed:
+            raise StaleExecutionError("Responsibility execution scope has ended")
+        if responsibility_id not in rc.responsibility_scope.executions:
             store = self._sessions.responsibilities
             claim = store.claim_foreground(responsibility_id)
-            rc.responsibility_executions[responsibility_id] = ResponsibilityExecution(store, claim)
-        return rc.responsibility_executions[responsibility_id].claim
+            rc.responsibility_scope.executions[responsibility_id] = ResponsibilityExecution(store, claim)
+        return rc.responsibility_scope.executions[responsibility_id].claim
 
     def _save_goal_state(
         self,
@@ -122,6 +127,10 @@ class _GoalToolsMixin:
             )
         claim = self._execution_claim(record.id)
         record = store.assert_owner(claim)
+        if reset_continuation and responsibility_id:
+            record.wake_generation += 1
+            record.next_wake_ms = None
+            record.waiting_for = None
         record.objective = blob["objective"]
         record.ui_summary = blob.get("ui_summary", "")
         record.progress = blob.get("recap", "")

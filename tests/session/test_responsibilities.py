@@ -339,7 +339,7 @@ async def test_empty_cron_tick_never_submits_a_turn(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stale_goal_tool_context_cannot_wait_complete_or_checkpoint(tmp_path):
-    from nanobot.agent.tools.context import ResponsibilityExecution
+    from nanobot.agent.tools.context import ResponsibilityExecution, ResponsibilityExecutionScope
     from nanobot.session.responsibilities import StaleExecutionError
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("cli:one")
@@ -350,7 +350,7 @@ async def test_stale_goal_tool_context_cannot_wait_complete_or_checkpoint(tmp_pa
     current = store.takeover(record.id)
     baseline = store.get(record.id).model_dump()
     request = RequestContext(channel="cli", chat_id="one", session_key=session.key,
-                             responsibility_executions={record.id: ResponsibilityExecution(store, old, foreground=False)})
+                             responsibility_scope=ResponsibilityExecutionScope({record.id: ResponsibilityExecution(store, old, foreground=False)}))
     with request_context(request):
         tool = UpdateGoalTool(sessions)
         for action in ["complete", "cancel", "block", "pause", "wait", "checkpoint", "bind"]:
@@ -359,3 +359,51 @@ async def test_stale_goal_tool_context_cannot_wait_complete_or_checkpoint(tmp_pa
                                    waiting_for="event", checkpoint_json='{"completed_steps":["stale"]}')
     assert store.get(record.id).model_dump() == baseline
     store.finish(current)
+
+
+@pytest.mark.asyncio
+async def test_late_callback_from_finished_turn_cannot_reacquire_ownership(tmp_path):
+    from nanobot.agent.tools.context import (
+        bind_request_context,
+        current_request_context,
+        reset_request_context,
+    )
+    from nanobot.session.responsibilities import StaleExecutionError
+    sessions = SessionManager(tmp_path)
+    request = RequestContext(channel="cli", chat_id="one", session_key="cli:one")
+    with request_context(request), goal_mutation_permission(True):
+        await CreateGoalTool(sessions).execute(objective="Review")
+        captured = current_request_context()  # An async child inherits this scope.
+        record, = sessions.responsibilities.list()
+    assert captured is not None
+    claim = sessions.responsibilities.claim_foreground(record.id)
+    sessions.responsibilities.finish(claim)
+    token = bind_request_context(captured)
+    try:
+        with pytest.raises(StaleExecutionError, match="scope has ended"):
+            await UpdateGoalTool(sessions).execute(action="checkpoint", responsibility_id=record.id, recap="late")
+    finally:
+        reset_request_context(token)
+    assert sessions.responsibilities.get(record.id).progress != "late"
+
+
+@pytest.mark.asyncio
+async def test_replacing_objective_invalidates_already_queued_schedule(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from nanobot.session.responsibility_turns import run_responsibility_wakes
+    sessions = SessionManager(tmp_path)
+    context = RequestContext(channel="cli", chat_id="one", session_key="cli:one")
+    with request_context(context), goal_mutation_permission(True):
+        await CreateGoalTool(sessions).execute(objective="Old objective")
+        await UpdateGoalTool(sessions).execute(action="wait", next_wake_ms=1)
+    record, = sessions.responsibilities.list()
+    old_wake = f"schedule:{record.wake_generation}:1"
+    sessions.responsibilities.enqueue(record.id, old_wake, "Old schedule")
+    with request_context(context), goal_mutation_permission(True):
+        await UpdateGoalTool(sessions).execute(action="replace", objective="Replacement")
+    submit = AsyncMock()
+    await run_responsibility_wakes(sessions.responsibilities, submit_turn=submit,
+                                  is_channel_enabled=lambda _: True, session_exists=lambda _: True)
+    submit.assert_not_awaited()
+    assert sessions.responsibilities.get(record.id).wakes[old_wake].state == "DISCARDED"
