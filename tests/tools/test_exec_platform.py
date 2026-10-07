@@ -143,7 +143,8 @@ class TestSpawnUnix:
             await ExecTool._spawn("echo hi", "/tmp", {"HOME": "/tmp"})
 
         args = mock_exec.call_args[0]
-        assert "bash" in args[0]
+        assert "bwrap" in args[0]
+        assert "bash" in args[-3]
         assert "-l" not in args
         assert "-c" in args
         assert "echo hi" in args
@@ -171,30 +172,15 @@ class TestSpawnUnix:
 class TestSpawnWindows:
 
     @pytest.mark.asyncio
-    async def test_job_assignment_failure_kills_suspended_process(self):
-        env = {"PATH": ""}
-        process = AsyncMock()
-        process.pid = 123
-        process.returncode = None
-        process.kill = MagicMock()
-        process.wait.return_value = -9
-        job = MagicMock(spec=_FakeWindowsJob)
-        job.creation_flags = 0x4
-        job.assign_and_resume.side_effect = OSError("OpenProcess failed")
-
+    async def test_windows_fails_closed_before_starting_an_unprotected_process(self):
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
             patch("nanobot.agent.tools.shell.sys", MagicMock(platform="win32")),
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
-            patch.object(ExecTool, "_create_windows_job", return_value=job),
-            pytest.raises(OSError, match="OpenProcess failed"),
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn,
+            pytest.raises(RuntimeError, match="isolation backend"),
         ):
-            mock_exec.return_value = process
-            await ExecTool._spawn("echo hi", r"C:\work", env, process_tree=True)
-
-        job.terminate.assert_called_once_with()
-        process.kill.assert_called_once_with()
-        process.wait.assert_awaited_once_with()
+            await ExecTool._spawn("echo hi", r"C:\work", {"PATH": ""}, process_tree=True)
+        spawn.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_single_line_uses_powershell(self):

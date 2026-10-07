@@ -40,6 +40,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
+from nanobot.security.runtime_storage import protect_runtime_command
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
@@ -529,6 +530,17 @@ class ExecTool(Tool):
         process_tree: bool = False,
     ) -> asyncio.subprocess.Process:
         """Launch an argument vector directly or a command string through a shell."""
+        if sys.platform not in {"linux", "darwin"}:
+            raise RuntimeError("Protected runtime storage requires a supported shell isolation backend")
+        if not _IS_WINDOWS:
+            if isinstance(command, str):
+                program = shell_program or shutil.which("bash") or "/bin/bash"
+                args = [program]
+                if login and Path(program).name.lower() in {"bash", "bash.exe", "zsh", "zsh.exe"}:
+                    args.append("-l")
+                args.extend(["-c", command])
+                command = args
+            command = protect_runtime_command(command)
         if isinstance(command, list):
             executable = shutil.which(command[0], path=env.get("PATH", ""))
             if executable is None:

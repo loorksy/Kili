@@ -634,6 +634,7 @@ def _run_gateway(
                 session_manager.responsibilities,
                 submit_turn=agent.submit_cron_turn,
                 is_channel_enabled=lambda name: channels.get_channel(name) is not None,
+                session_exists=lambda key: session_manager.get_existing(key) is not None,
             )
             return None
 

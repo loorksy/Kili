@@ -38,9 +38,9 @@ def test_stale_update_cannot_overwrite_progress(tmp_path):
     record = store.create(objective="Review", session_key=None, channel="", chat_id="")
     stale = store.get(record.id)
     record.progress = "First step complete"
-    store.save(record)
+    store.control_update(record)
     with pytest.raises(ValueError, match="changed"):
-        store.save(stale)
+        store.control_update(stale)
     assert store.get(record.id).progress == "First step complete"
 
 
@@ -52,14 +52,17 @@ def test_checkpoint_and_wake_recovered_after_process_death(tmp_path):
     script = '''
 import os, sys
 from pathlib import Path
+from nanobot.config.loader import set_config_path
+set_config_path(Path(sys.argv[3]))
 from nanobot.session.responsibilities import ResponsibilityStore
 s = ResponsibilityStore(Path(sys.argv[1]))
 s.enqueue(sys.argv[2], "event:123", "report arrived")
-s.claim(sys.argv[2], "event:123")
-s.checkpoint_tools(sys.argv[2], {"pending_tool_calls": [{"id": "tool-1"}], "assistant_message": {"reasoning_content": "SECRET REASONING"}}, "websocket:one")
+claim = s.claim(sys.argv[2], "event:123")
+s.checkpoint_tools(claim, {"pending_tool_calls": [{"id": "tool-1"}], "assistant_message": {"reasoning_content": "SECRET REASONING"}}, "websocket:one")
 os._exit(17)
 '''
-    result = subprocess.run([sys.executable, "-c", script, str(tmp_path), record.id])
+    from nanobot.config.paths import get_config_path
+    result = subprocess.run([sys.executable, "-c", script, str(tmp_path), record.id, str(get_config_path())])
     assert result.returncode == 17
     restarted = ResponsibilityStore(tmp_path)
     assert restarted.recover() == [record.id]
@@ -76,9 +79,10 @@ def test_completed_wake_is_never_claimed_twice(tmp_path):
     store = ResponsibilityStore(tmp_path)
     record = store.create(objective="Review", session_key=None, channel="", chat_id="")
     assert store.enqueue(record.id, "event:1", "review")
-    assert store.claim(record.id, "event:1") is not None
+    claim = store.claim(record.id, "event:1")
+    assert claim is not None
     assert ResponsibilityStore(tmp_path).claim(record.id, "event:1") is None
-    store.finish(record.id, "event:1")
+    store.finish(claim)
     restarted = ResponsibilityStore(tmp_path)
     assert restarted.recover() == []
     assert restarted.claim(record.id, "event:1") is None
@@ -99,7 +103,7 @@ async def test_overdue_wake_uses_existing_cron_and_real_agent_loop(tmp_path):
     store = ResponsibilityStore(tmp_path)
     record = store.create(objective="Inspect gold and sleep", session_key="cli:one", channel="cli", chat_id="one")
     record.state, record.next_wake_ms = "SCHEDULED", 1
-    store.save(record)
+    store.control_update(record)
     # Fresh store represents a gateway restart after the due time was missed.
     restarted = ResponsibilityStore(tmp_path)
     provider = MagicMock()
@@ -110,6 +114,9 @@ async def test_overdue_wake_uses_existing_cron_and_real_agent_loop(tmp_path):
             id="wait-1", name="update_goal", arguments={"action": "wait", "waiting_for": "user", "recap": "Checked the report"})]),
         LLMResponse(content="Nothing needs attention."),
     ])
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("cli:one")
+    sessions.save(session, fsync=True)
     agent = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     import asyncio
     running = asyncio.create_task(agent.run())
@@ -119,7 +126,7 @@ async def test_overdue_wake_uses_existing_cron_and_real_agent_loop(tmp_path):
                                     payload=CronPayload(kind="system_event")))
     async def callback(_job):
         await run_responsibility_wakes(restarted, submit_turn=agent.submit_cron_turn,
-                                       is_channel_enabled=lambda _: True)
+                                       is_channel_enabled=lambda _: True, session_exists=lambda _: True)
     cron.on_job = callback
     try:
         await cron.start()
@@ -155,7 +162,7 @@ async def test_replayed_trigger_wakes_correct_rebound_responsibility_once(tmp_pa
     second = store.create(objective="Second", session_key="websocket:two", channel="websocket", chat_id="two")
     first.state = "WAITING_FOR_EVENT"
     first.session_key, first.chat_id = "websocket:rebound", "rebound"
-    store.save(first)
+    store.control_update(first)
     triggers = LocalTriggerStore(tmp_path)
     trigger = triggers.create(name="gold", channel="websocket", chat_id="one", session_key="websocket:one",
                               origin_metadata={RESPONSIBILITY_TRIGGER_META: first.id})
@@ -166,8 +173,8 @@ async def test_replayed_trigger_wakes_correct_rebound_responsibility_once(tmp_pa
                                 is_channel_enabled=lambda _: True, responsibilities=store)
     assert submit.await_count == 0  # Acknowledgment follows durable enqueue, not inference.
     await run_responsibility_wakes(ResponsibilityStore(tmp_path), submit_turn=submit,
-                                   is_channel_enabled=lambda _: True)
-    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: True)
+                                   is_channel_enabled=lambda _: True, session_exists=lambda _: True)
+    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: True, session_exists=lambda _: True)
     assert submit.await_count == 1
     message = submit.await_args.args[0]
     assert message.session_key == "websocket:rebound"
@@ -201,13 +208,13 @@ async def test_replaced_schedule_discards_queued_old_wake(tmp_path):
     store = ResponsibilityStore(tmp_path)
     record = store.create(objective="Review", session_key="websocket:x", channel="websocket", chat_id="x")
     record.state, record.next_wake_ms = "SCHEDULED", 1
-    store.save(record)
+    store.control_update(record)
     submit = AsyncMock()
-    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: False, now_ms=10)
+    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: False, session_exists=lambda _: True, now_ms=10)
     record = store.get(record.id)
     record.next_wake_ms, record.wake_generation = 100, 1
-    store.save(record)
-    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: True, now_ms=10)
+    store.control_update(record)
+    await run_responsibility_wakes(store, submit_turn=submit, is_channel_enabled=lambda _: True, session_exists=lambda _: True, now_ms=10)
     assert submit.await_count == 0
     assert store.get(record.id).wakes["schedule:0:1"].state == "DISCARDED"
 
@@ -233,3 +240,122 @@ async def test_transient_chat_cannot_create_durable_goal(tmp_path):
         result = await CreateGoalTool(sessions).execute(objective="Private temporary work")
     assert "persistent conversation" in result
     assert sessions.responsibilities.list() == []
+
+
+def test_takeover_fences_every_write_even_after_latest_record_reload(tmp_path):
+    from nanobot.session.responsibilities import StaleExecutionError
+    store = ResponsibilityStore(tmp_path)
+    record = store.create(objective="Review", session_key=None, channel="", chat_id="")
+    worker_a = store.claim_foreground(record.id)
+    worker_b = ResponsibilityStore(tmp_path).takeover(record.id)
+    assert worker_b.generation == worker_a.generation + 1
+    for state in ["RUNNING", "WAITING", "SCHEDULED", "COMPLETED", "FAILED"]:
+        latest = store.get(record.id)  # Re-reading does not acquire B's authority.
+        latest.state = state
+        latest.progress = "stale progress"
+        latest.next_wake_ms = 123
+        latest.wake_generation += 1
+        latest.checkpoint.pending_work = ["stale retry"]
+        with pytest.raises(StaleExecutionError):
+            store.save(latest, claim=worker_a)
+    with pytest.raises(StaleExecutionError):
+        store.checkpoint_tools(worker_a, {"completed_tool_results": [{"tool_call_id": "stale"}]}, "cli:one")
+    for uncertain in [False, True]:
+        with pytest.raises(StaleExecutionError):
+            store.finish(worker_a, uncertain=uncertain)
+    latest = store.assert_owner(worker_b)
+    latest.progress = "current worker"
+    store.save(latest, claim=worker_b)
+    assert store.get(record.id).progress == "current worker"
+    assert store.get(record.id).checkpoint.result_refs == []
+    store.finish(worker_b)
+
+
+@pytest.mark.asyncio
+async def test_deleted_delivery_stays_durable_until_explicit_bind(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from nanobot.session.responsibility_turns import run_responsibility_wakes
+    sessions = SessionManager(tmp_path)
+    old = sessions.get_or_create("websocket:old")
+    sessions.save(old)
+    record = sessions.responsibilities.create(objective="Monitor", session_key=old.key,
+                                             channel="websocket", chat_id="old")
+    record.state, record.next_wake_ms = "SCHEDULED", 1
+    sessions.responsibilities.control_update(record)
+    sessions.delete_session(old.key)
+    submit = AsyncMock(return_value=None)
+    async def tick():
+        await run_responsibility_wakes(sessions.responsibilities, submit_turn=submit,
+                                      is_channel_enabled=lambda _: True,
+                                      session_exists=lambda key: sessions.get_existing(key) is not None,
+                                      now_ms=10)
+    await tick()
+    await tick()
+    saved = sessions.responsibilities.get(record.id)
+    assert saved.delivery_needed
+    assert saved.state == "SCHEDULED"
+    assert list(saved.wakes) == ["schedule:0:1"]
+    assert saved.wakes["schedule:0:1"].state == "QUEUED"
+    assert submit.await_count == 0
+    assert sessions.get_existing(old.key) is None
+    with request_context(RequestContext(channel="websocket", chat_id="new", session_key="websocket:new")):
+        await UpdateGoalTool(sessions).execute(action="bind", responsibility_id=record.id)
+    await tick()
+    await tick()
+    assert submit.await_count == 1
+    assert submit.await_args.args[0].session_key == "websocket:new"
+    assert submit.await_args.args[0].require_existing_session
+    assert not sessions.responsibilities.get(record.id).delivery_needed
+
+
+def test_draft_state_relocated_once_with_protected_backup(tmp_path):
+    from nanobot.session.responsibilities import Responsibility
+    legacy = tmp_path / "responsibilities"
+    legacy.mkdir()
+    record = Responsibility(version=1, id="resp_" + "a" * 32, objective="Legacy wait", state="WAITING_FOR_EVENT")
+    source = legacy / (record.id + ".json")
+    source.write_text(record.model_dump_json())
+    store = ResponsibilityStore(tmp_path)
+    store.migrate_workspace_records()
+    assert not source.exists()
+    assert (store.root / "legacy-backup" / source.name).exists()
+    assert store.get(record.id).version == 2
+    assert store.get(record.id).state == "WAITING_FOR_EVENT"
+    store.migrate_workspace_records()
+    assert len(store.list()) == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_cron_tick_never_submits_a_turn(tmp_path):
+    from unittest.mock import AsyncMock
+
+    from nanobot.session.responsibility_turns import run_responsibility_wakes
+    submit = AsyncMock()
+    await run_responsibility_wakes(ResponsibilityStore(tmp_path), submit_turn=submit,
+                                  is_channel_enabled=lambda _: True, session_exists=lambda _: True)
+    submit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_goal_tool_context_cannot_wait_complete_or_checkpoint(tmp_path):
+    from nanobot.agent.tools.context import ResponsibilityExecution
+    from nanobot.session.responsibilities import StaleExecutionError
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("cli:one")
+    sessions.save(session)
+    store = sessions.responsibilities
+    record = store.create(objective="Review", session_key=session.key, channel="cli", chat_id="one")
+    old = store.claim_foreground(record.id)
+    current = store.takeover(record.id)
+    baseline = store.get(record.id).model_dump()
+    request = RequestContext(channel="cli", chat_id="one", session_key=session.key,
+                             responsibility_executions={record.id: ResponsibilityExecution(store, old, foreground=False)})
+    with request_context(request):
+        tool = UpdateGoalTool(sessions)
+        for action in ["complete", "cancel", "block", "pause", "wait", "checkpoint", "bind"]:
+            with pytest.raises(StaleExecutionError):
+                await tool.execute(action=action, responsibility_id=record.id, recap="stale",
+                                   waiting_for="event", checkpoint_json='{"completed_steps":["stale"]}')
+    assert store.get(record.id).model_dump() == baseline
+    store.finish(current)

@@ -22,6 +22,7 @@ RESPONSIBILITY_CRON_ID = "responsibility_wakes"
 
 def migrate_session_goals(sessions: SessionManager) -> None:
     """Idempotently link legacy goals; do not schedule previously unscheduled work."""
+    sessions.responsibilities.migrate_workspace_records()
     for row in sessions.list_sessions():
         session = sessions.get_existing(row["key"])
         if session is None or not session.policy.persist:
@@ -43,7 +44,7 @@ def migrate_session_goals(sessions: SessionManager) -> None:
         )
         if goal.get("status") == "blocked" and record.revision == 0:
             record.state = "WAITING_FOR_USER"
-            record = sessions.responsibilities.save(record)
+            record = sessions.responsibilities.control_update(record)
         session.metadata[GOAL_STATE_KEY] = {**goal, **record.goal_projection()}
         sessions.save(session, fsync=True)
 
@@ -53,6 +54,7 @@ async def run_responsibility_wakes(
     *,
     submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]],
     is_channel_enabled: Callable[[str], bool],
+    session_exists: Callable[[str], bool],
     now_ms: int | None = None,
 ) -> None:
     """One cron callback; no background loop, workers or alternate agent runtime.
@@ -70,10 +72,14 @@ async def run_responsibility_wakes(
         for wake_id, receipt in record.wakes.items():
             if receipt.state != "QUEUED":
                 continue
-            claimed = store.claim(record.id, wake_id)
-            if claimed is None:
+            session_key = record.session_key or f"{record.channel}:{record.chat_id}"
+            if not session_exists(session_key):
+                store.delivery_missing(record.id)
                 continue
-            session_key = claimed.session_key or f"{claimed.channel}:{claimed.chat_id}"
+            claim = store.claim(record.id, wake_id)
+            if claim is None:
+                continue
+            claimed = store.assert_owner(claim)
             content = (
                 "Continue this durable responsibility using its saved operational state. "
                 "Inspect current state before effects. When no work remains now, use update_goal "
@@ -99,9 +105,10 @@ async def run_responsibility_wakes(
                 await submit_turn(InboundMessage(
                     channel=claimed.channel, chat_id=claimed.chat_id, sender_id="cron",
                     content=content, metadata=metadata, session_key_override=session_key,
+                    require_existing_session=True, responsibility_claim=claim,
                 ))
             except (Exception, asyncio.CancelledError):
-                store.finish(claimed.id, wake_id, uncertain=True)
+                store.finish(claim, uncertain=True)
                 raise
             else:
-                store.finish(claimed.id, wake_id)
+                store.finish(claim)

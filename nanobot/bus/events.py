@@ -1,11 +1,14 @@
 """Event types for the message bus."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from nanobot.events import AgentEvent
+    from nanobot.session.responsibilities import ExecutionClaim
 
 # Optional ``OutboundMessage.metadata`` key for structured, channel-agnostic UI
 # payloads. Value is JSON-serializable with at least ``kind``; rich clients may
@@ -35,6 +38,8 @@ class InboundMessage:
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
     require_existing_session: bool = False
     input_role: Literal["user", "system"] | None = None
+    # Internal capability carried outside metadata, events and history.
+    responsibility_claim: ExecutionClaim | None = None
 
     @property
     def session_key(self) -> str:

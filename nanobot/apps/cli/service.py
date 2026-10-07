@@ -23,6 +23,7 @@ from loguru import logger
 from nanobot.agent.skills import parse_skill_metadata, valid_skill_metadata
 from nanobot.apps.protocol import app_manifest, compact_dict
 from nanobot.config.paths import get_runtime_subdir
+from nanobot.security.runtime_storage import protect_runtime_command
 from nanobot.security.workspace_policy import is_path_within
 
 CLI_ANYTHING_REGISTRY_URL = "https://hkuds.github.io/CLI-Anything/registry.json"
@@ -1458,7 +1459,7 @@ Use the `run_cli_app` tool with `name="{name}"` for command execution. Do not in
         artifact_snapshot = self._artifact_snapshot(cwd)
         try:
             result = subprocess.run(
-                [resolved, *clean_args],
+                protect_runtime_command([resolved, *clean_args]),
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,

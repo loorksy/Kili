@@ -26,6 +26,7 @@ from nanobot.security.network import (
     resolve_url_target,
     validate_url_target,
 )
+from nanobot.security.runtime_storage import protect_runtime_command
 from nanobot.utils.cancellation import task_is_cancelling
 
 if TYPE_CHECKING:
@@ -1076,9 +1077,10 @@ async def connect_mcp_servers(
                     cfg.args,
                     cfg.env or None,
                 )
+                protected = protect_runtime_command([command, *args])
                 params = StdioServerParameters(
-                    command=command,
-                    args=args,
+                    command=protected[0],
+                    args=protected[1:],
                     env=env,
                     cwd=cfg.cwd or None,
                 )

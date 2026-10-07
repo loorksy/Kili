@@ -260,7 +260,10 @@ async def test_kill_process_tree_kills_descendant_after_root_exits(tmp_path):
         "import base64,subprocess,sys; "
         f"child=base64.b64decode('{child_payload}').decode(); "
         "subprocess.Popen([sys.executable, '-c', child], "
-        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "import pathlib,time\n"
+        f"while not pathlib.Path({str(started)!r}).exists():\n"
+        "    time.sleep(0.01)\n"
     )
     tool = ExecTool(working_dir=str(tmp_path), timeout=10)
     process = await tool._spawn(

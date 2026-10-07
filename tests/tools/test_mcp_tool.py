@@ -76,6 +76,9 @@ def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _fake_mcp_module(
     monkeypatch: pytest.MonkeyPatch, fake_mcp_runtime: dict[str, object | None]
 ) -> None:
+    # These SDK lifecycle tests simulate transports, not OS child processes.
+    # Real protected stdio startup is covered in test_runtime_storage.py.
+    monkeypatch.setattr(mcp_mod, "protect_runtime_command", lambda argv: argv)
     mod = ModuleType("mcp")
     mod.types = SimpleNamespace(
         TextContent=_FakeTextContent,

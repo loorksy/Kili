@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.tools.sandbox import _sbpl_quote, _seatbelt_is_within, wrap_command
+from nanobot.agent.tools.sandbox import _seatbelt_is_within, quote_sandbox_path, wrap_command
 
 
 def _parse(cmd: str) -> list[str]:
@@ -240,7 +240,7 @@ class TestSeatbeltBackend:
     @staticmethod
     def _quote(path: object) -> str:
         """Render *path* as expected in the generated SBPL profile."""
-        return _sbpl_quote(str(path))
+        return quote_sandbox_path(str(path))
 
     @staticmethod
     def _metadata_rule(profile: str) -> str:
@@ -480,9 +480,9 @@ class TestSeatbeltBackend:
         escaped = str(ws).replace("\\", "\\\\").replace('"', '\\"')
         assert f'(allow file-read* file-write* (subpath "{escaped}"))' in profile
 
-    def test_sbpl_quote_escapes_special_characters(self):
+    def testquote_sandbox_path_escapes_special_characters(self):
         """Backslashes and double quotes must be escaped with C-style escaping."""
-        assert _sbpl_quote(r'path\with"quotes') == r'"path\\with\"quotes"'
+        assert quote_sandbox_path(r'path\with"quotes') == r'"path\\with\"quotes"'
 
 
 class TestUnknownBackend:

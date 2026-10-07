@@ -1,6 +1,7 @@
 """Runtime context for tool construction."""
 from __future__ import annotations
 
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -18,12 +19,27 @@ if TYPE_CHECKING:
     from nanobot.providers.factory import ProviderSnapshot
     from nanobot.security.workspace_access import WorkspaceSandboxStatus
     from nanobot.session.manager import SessionManager
+    from nanobot.session.responsibilities import ExecutionClaim, ResponsibilityStore
     from nanobot.utils.llm_runtime import LLMRuntime
 
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,
 )
+
+
+@dataclass(frozen=True)
+class ResponsibilityExecution:
+    store: ResponsibilityStore
+    claim: ExecutionClaim
+    foreground: bool = True
+
+
+def finish_responsibility_executions(ctx: RequestContext, *, uncertain: bool = False) -> None:
+    for responsibility_id, execution in list(ctx.responsibility_executions.items()):
+        if execution.foreground:
+            execution.store.finish(execution.claim, uncertain=uncertain)
+            del ctx.responsibility_executions[responsibility_id]
 
 
 @dataclass(frozen=True)
@@ -44,6 +60,8 @@ class RequestContext:
     # The host can consume completion messages after this request returns.
     can_receive_background_results: bool = True
     persist_session: bool = True
+    # Backend-only capabilities, never part of model-visible metadata.
+    responsibility_executions: dict[str, ResponsibilityExecution] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -67,7 +85,10 @@ def request_context(ctx: RequestContext):
     try:
         yield ctx
     finally:
-        reset_request_context(token)
+        try:
+            finish_responsibility_executions(ctx, uncertain=sys.exc_info()[0] is not None)
+        finally:
+            reset_request_context(token)
 
 
 def current_request_context() -> RequestContext | None:

@@ -1792,6 +1792,7 @@ class SessionManager:
                 pending.extend(children.get(current, ()))
             deleted = False
             for current in collected:
+                self.responsibilities.unlink_session(current)
                 self.invalidate(current)
                 deleted = self._store.delete(current) or deleted
                 if self._delete_observer is not None:

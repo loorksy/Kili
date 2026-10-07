@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
+import sys
 import time
 import weakref
 from collections.abc import Coroutine, Iterable, Mapping
@@ -32,7 +33,14 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
+from nanobot.agent.tools.context import (
+    RequestContext,
+    ResponsibilityExecution,
+    bind_request_context,
+    current_request_context,
+    finish_responsibility_executions,
+    reset_request_context,
+)
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import capture_message_deliveries
@@ -74,7 +82,12 @@ from nanobot.security.workspace_access import (
 )
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
-from nanobot.session.goal_state import goal_state_runtime_lines, sustained_goal_active
+from nanobot.session.goal_state import (
+    goal_state_raw,
+    goal_state_runtime_lines,
+    parse_goal_state,
+    sustained_goal_active,
+)
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
@@ -729,7 +742,7 @@ class AgentLoop:
             message_metadata=ctx.msg.metadata,
             session_metadata=ctx.session.metadata,
         )
-        return RequestContext(
+        request = RequestContext(
             channel=ctx.delivery.route.channel,
             chat_id=ctx.delivery.route.chat_id,
             message_id=ctx.msg.metadata.get("message_id"),
@@ -745,6 +758,26 @@ class AgentLoop:
             persist_session=ctx.session.policy.persist and not ctx.ephemeral,
             can_receive_background_results=self._running,
         )
+        store = self.sessions.responsibilities
+        claim = ctx.msg.responsibility_claim
+        if claim is not None:
+            store.assert_owner(claim)
+            request.responsibility_executions[claim.responsibility_id] = ResponsibilityExecution(store, claim, foreground=False)
+        else:
+            self._claim_session_responsibility(request, ctx.session)
+        return request
+
+    def _claim_session_responsibility(self, request: RequestContext, session: Session) -> None:
+        from nanobot.session.responsibilities import TERMINAL_STATES
+        goal = parse_goal_state(goal_state_raw(session.metadata))
+        responsibility_id = (goal or {}).get("responsibility_id")
+        if not isinstance(responsibility_id, str) or responsibility_id in request.responsibility_executions:
+            return
+        store = self.sessions.responsibilities
+        record = store.get(responsibility_id)
+        if record.state not in TERMINAL_STATES and not record.recovery_required:
+            claim = store.claim_foreground(record.id)
+            request.responsibility_executions[record.id] = ResponsibilityExecution(store, claim)
 
     async def _resolve_runtime_context_for_turn(
         self,
@@ -1176,6 +1209,8 @@ class AgentLoop:
             runtime=runtime,
             can_receive_background_results=self._running,
         )
+        if request_context is None and session is not None and not ephemeral:
+            self._claim_session_responsibility(request_ctx, session)
         active_session_key = session.key if session else request_ctx.session_key
         consolidation_session_key = active_session_key or "agent:transient"
         request_metadata = request_ctx.metadata
@@ -1294,10 +1329,14 @@ class AgentLoop:
                 events=events,
             ))
         finally:
-            turn_scope_stack.close()
-            reset_workspace_scope(workspace_token)
-            reset_request_context(request_token)
-            reset_file_states(file_state_token)
+            try:
+                if request_context is None:
+                    finish_responsibility_executions(request_ctx, uncertain=sys.exc_info()[0] is not None)
+            finally:
+                turn_scope_stack.close()
+                reset_workspace_scope(workspace_token)
+                reset_request_context(request_token)
+                reset_file_states(file_state_token)
         if session is not None and not ephemeral:
             session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
@@ -1821,18 +1860,22 @@ class AgentLoop:
 
             ctx.events = EventSink(track_output, ctx.events.accepts)
 
-        with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
-            await self._run_turn_stage(ctx, "restore", self._restore_turn)
-            await self._run_turn_stage(ctx, "compact", self._compact_session)
-            if await self._run_turn_stage(ctx, "command", self._dispatch_command):
-                self._log_turn_completion(ctx, outcome="command")
+        try:
+            with logger.contextualize(turn_id=ctx.turn_id, session_key=ctx.session_key):
+                await self._run_turn_stage(ctx, "restore", self._restore_turn)
+                await self._run_turn_stage(ctx, "compact", self._compact_session)
+                if await self._run_turn_stage(ctx, "command", self._dispatch_command):
+                    self._log_turn_completion(ctx, outcome="command")
+                    return ctx.outbound
+                await self._run_turn_stage(ctx, "build", self._build_turn)
+                await self._run_turn_stage(ctx, "run", self._run_turn)
+                await self._run_turn_stage(ctx, "save", self._persist_turn)
+                await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
+                self._log_turn_completion(ctx)
                 return ctx.outbound
-            await self._run_turn_stage(ctx, "build", self._build_turn)
-            await self._run_turn_stage(ctx, "run", self._run_turn)
-            await self._run_turn_stage(ctx, "save", self._persist_turn)
-            await self._run_turn_stage(ctx, "respond", self._prepare_outbound)
-            self._log_turn_completion(ctx)
-            return ctx.outbound
+        finally:
+            if ctx.request_context is not None:
+                finish_responsibility_executions(ctx.request_context, uncertain=sys.exc_info()[0] is not None)
 
     async def _run_turn_stage(
         self,
@@ -1960,13 +2003,10 @@ class AgentLoop:
             else:
                 ctx.session = self.sessions.get_or_create(ctx.session_key)
         session = ctx.session
-        from nanobot.session.responsibility_turns import RESPONSIBILITY_WAKE_META
-        wake = msg.metadata.get(RESPONSIBILITY_WAKE_META)
-        if isinstance(wake, dict):
-            responsibility = self.sessions.responsibilities.get(wake["id"])
-            if (responsibility.active_wake_id != wake.get("wake_id")
-                    or responsibility.recovery_required
-                    or responsibility.state != "RUNNING"):
+        claim = msg.responsibility_claim
+        if claim is not None:
+            responsibility = self.sessions.responsibilities.assert_owner(claim)
+            if responsibility.recovery_required or responsibility.state != "RUNNING":
                 raise ValueError("Responsibility wake is no longer admitted")
             session.metadata["goal_state"] = responsibility.goal_projection()
         ctx.ephemeral = ctx.ephemeral or not session.policy.persist
@@ -2221,6 +2261,10 @@ class AgentLoop:
 
     async def _persist_turn(self, ctx: TurnContext) -> None:
         session = ctx.require_session()
+        if ctx.request_context is not None:
+            for execution in ctx.request_context.responsibility_executions.values():
+                record = execution.store.assert_owner(execution.claim)
+                session.metadata["goal_state"] = record.goal_projection()
 
         if (
             ctx.kind is TurnKind.USER
@@ -2509,13 +2553,12 @@ class AgentLoop:
 
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
         """Persist the latest in-flight turn state into session metadata."""
+        request = current_request_context()
+        if request is not None:
+            for execution in request.responsibility_executions.values():
+                execution.store.checkpoint_tools(execution.claim, payload, session.key)
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save_runtime_checkpoint(session)
-        goal = session.metadata.get("goal_state")
-        if isinstance(goal, dict) and goal.get("responsibility_id"):
-            self.sessions.responsibilities.checkpoint_tools(
-                goal["responsibility_id"], payload, session.key,
-            )
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True

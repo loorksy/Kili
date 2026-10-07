@@ -167,7 +167,7 @@ class LocalTriggerStore:
                     record.state = "PAUSED"
                     record.next_wake_ms = None
                     record.waiting_for = "Event trigger deleted; bind a new trigger before continuing"
-                    responsibilities.save(record)
+                    responsibilities.control_update(record)
             self._save_triggers_unlocked(remaining)
             self._delete_delivery_files_for_trigger_unlocked(trigger_id)
             return True

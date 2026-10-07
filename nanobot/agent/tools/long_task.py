@@ -14,7 +14,12 @@ from nanobot.agent.goal_permission import (
     revoke_goal_mutation_permission,
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
+from nanobot.agent.tools.context import (
+    RequestContext,
+    ResponsibilityExecution,
+    ToolContext,
+    current_request_context,
+)
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
@@ -31,6 +36,7 @@ from nanobot.session.goal_state import (
 )
 from nanobot.session.responsibilities import (
     TERMINAL_STATES,
+    ExecutionClaim,
     ResponsibilityCheckpoint,
     ResponsibilityState,
 )
@@ -74,10 +80,22 @@ class _GoalToolsMixin:
         key = request_ctx.session_key
         if not key:
             return None
+        if request_ctx.responsibility_executions:
+            return self._sessions.get_existing(key)
         return self._sessions.get_or_create(key)
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
+
+    def _execution_claim(self, responsibility_id: str) -> ExecutionClaim:
+        rc = current_request_context()
+        if rc is None:
+            raise RuntimeError("Responsibility execution requires backend request context")
+        if responsibility_id not in rc.responsibility_executions:
+            store = self._sessions.responsibilities
+            claim = store.claim_foreground(responsibility_id)
+            rc.responsibility_executions[responsibility_id] = ResponsibilityExecution(store, claim)
+        return rc.responsibility_executions[responsibility_id].claim
 
     def _save_goal_state(
         self,
@@ -91,7 +109,8 @@ class _GoalToolsMixin:
         store = self._sessions.responsibilities
         responsibility_id = blob.get("responsibility_id")
         if responsibility_id:
-            record = store.get(responsibility_id)
+            claim = self._execution_claim(responsibility_id)
+            record = store.assert_owner(claim)
         else:
             from nanobot.security.workspace_access import current_workspace_scope
             scope = current_workspace_scope()
@@ -101,13 +120,15 @@ class _GoalToolsMixin:
                 chat_id=rc.chat_id if rc else "",
                 workspace_scope=scope.metadata() if scope else None,
             )
+        claim = self._execution_claim(record.id)
+        record = store.assert_owner(claim)
         record.objective = blob["objective"]
         record.ui_summary = blob.get("ui_summary", "")
         record.progress = blob.get("recap", "")
         states: dict[str, ResponsibilityState] = {"active": "QUEUED", "blocked": "WAITING_FOR_USER",
                         "completed": "COMPLETED", "cancelled": "CANCELLED"}
         record.state = states[blob["status"]]
-        record = store.save(record)
+        record = store.save(record, claim=self._execution_claim(record.id))
         blob = {**blob, **record.goal_projection()}
         sess.metadata[GOAL_STATE_KEY] = blob
         discard_legacy_goal_state_key(sess.metadata)
@@ -223,7 +244,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         )
         state = wrap_runtime_context_lines(goal_state_runtime_lines(session.metadata))
         if record is not None:
-            state += "\n" + json.dumps(record.model_dump(mode="json", exclude={"wakes"}), ensure_ascii=False)
+            state += "\n" + json.dumps(record.model_dump(mode="json", exclude={"wakes", "execution_token"}), ensure_ascii=False)
         content = "\n\n".join(part for part in (guidance, state) if part)
         return RuntimeContextBlock(source="goal", content=content)
 
@@ -361,17 +382,25 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             return ToolResult.error("Error: durable goals require a persistent conversation.")
         store = self._sessions.responsibilities
         if action == "list":
-            return json.dumps([r.model_dump(mode="json") for r in store.list()], ensure_ascii=False)
+            return json.dumps([r.model_dump(mode="json", exclude={"execution_token"}) for r in store.list()], ensure_ascii=False)
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         responsibility_id = responsibility_id or (prior or {}).get("responsibility_id")
         if responsibility_id:
             record = store.get(responsibility_id)
             prior = {**(prior or {}), **record.goal_projection()}
             if action in {"checkpoint", "wait", "pause", "resume", "bind"}:
+                if record.recovery_required and action == "resume" and not self._goal_mutation_allowed():
+                    return ToolResult.error("Error: reconcile interrupted work and obtain explicit user /goal authorization before resuming.")
+                claim = self._execution_claim(record.id)
+                record = store.assert_owner(claim)
                 if record.state in TERMINAL_STATES:
                     return ToolResult.error("Error: responsibility is already finished.")
                 if checkpoint_json is not None:
-                    record.checkpoint = ResponsibilityCheckpoint.model_validate_json(checkpoint_json)
+                    checkpoint = ResponsibilityCheckpoint.model_validate_json(checkpoint_json)
+                    if checkpoint.pending_tools:
+                        return ToolResult.error("Error: pending tool ownership is managed by the runtime.")
+                    checkpoint.pending_tools = record.checkpoint.pending_tools
+                    record.checkpoint = checkpoint
                 if recap is not None:
                     record.progress = recap.strip()[:8000]
                 if action == "wait":
@@ -399,7 +428,8 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                     rc = current_request_context()
                     assert rc is not None
                     record.session_key, record.channel, record.chat_id = sess.key, rc.channel, rc.chat_id
-                record = store.save(record)
+                    record.delivery_needed = False
+                record = store.save(record, claim=self._execution_claim(record.id))
                 trigger_note = ""
                 if action == "wait" and record.state == "WAITING_FOR_EVENT":
                     from nanobot.session.responsibility_turns import RESPONSIBILITY_TRIGGER_META
