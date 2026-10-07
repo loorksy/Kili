@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Literal, Protocol
 
@@ -68,6 +69,41 @@ class Approval(BaseModel):
     expires_at: int
     resolved_at: int | None = None
     resolved_by: str | None = None
+    resolution_queued: bool = False
+
+
+class EffectOwner(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    workspace: str
+    responsibility_id: str
+    wake_id: str
+    generation: int
+    token: str
+
+
+class AuthorizedAction(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    action: Action
+    approval_id: str | None = None
+
+
+_AUTHORIZED_ACTION: ContextVar[AuthorizedAction | None] = ContextVar("authorized_action", default=None)
+_POLICY_APPROVAL: ContextVar[tuple[str, str] | None] = ContextVar("policy_approval", default=None)
+
+
+def current_authorized_action() -> AuthorizedAction | None:
+    return _AUTHORIZED_ACTION.get()
+
+
+@contextmanager
+def action_authorization(action: Action) -> Generator[AuthorizedAction]:
+    approval = _POLICY_APPROVAL.get()
+    grant = AuthorizedAction(action=action, approval_id=approval[1] if approval and approval[0] == action.fingerprint else None)
+    token = _AUTHORIZED_ACTION.set(grant)
+    try:
+        yield grant
+    finally:
+        _AUTHORIZED_ACTION.reset(token)
 
 
 class Effect(BaseModel):
@@ -80,6 +116,8 @@ class Effect(BaseModel):
     state: Literal["PROPOSED", "APPROVED", "STARTED", "SUCCEEDED", "FAILED", "UNCERTAIN", "RECONCILING"] = "PROPOSED"
     generation: int = 0
     token: str | None = None
+    owner: EffectOwner | None = None
+    approval_id: str | None = None
     provider_reference: str | None = None
     result: JsonValue = None
     created_at: int
@@ -95,7 +133,8 @@ class ActionStore:
         with self.transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS approvals (id TEXT PRIMARY KEY, fingerprint TEXT, record TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS effects (id TEXT PRIMARY KEY, idempotency_key TEXT UNIQUE, record TEXT NOT NULL)")
-            db.execute("PRAGMA user_version=1")
+            db.execute("CREATE TABLE IF NOT EXISTS approval_uses (approval_id TEXT PRIMARY KEY, effect_id TEXT UNIQUE NOT NULL)")
+            db.execute("PRAGMA user_version=2")
         self.path.chmod(0o600)
 
     @contextmanager
@@ -145,7 +184,18 @@ class ActionStore:
             db.execute("UPDATE approvals SET record=? WHERE id=?", (record.model_dump_json(), record.id))
             return record
 
-    def consume(self, action: Action) -> bool:
+    def pending_resolutions(self) -> list[Approval]:
+        with self.transaction() as db:
+            rows = db.execute("SELECT record FROM approvals").fetchall()
+        return [r for row in rows if (r := Approval.model_validate_json(row[0])).status in {"APPROVED","DENIED"} and not r.resolution_queued]
+
+    def mark_resolution_queued(self, approval_id: str) -> None:
+        with self.transaction() as db:
+            record = self._approval(db,approval_id)
+            record.resolution_queued = True
+            db.execute("UPDATE approvals SET record=? WHERE id=?",(record.model_dump_json(),record.id))
+
+    def consume_approval(self, action: Action) -> Approval | None:
         with self.transaction() as db:
             rows = db.execute("SELECT record FROM approvals WHERE fingerprint=?", (action.fingerprint,)).fetchall()
             for row in rows:
@@ -153,8 +203,16 @@ class ActionStore:
                 if record.status == "APPROVED" and record.expires_at > now_ms():
                     record.status = "CONSUMED"
                     db.execute("UPDATE approvals SET record=? WHERE id=?", (record.model_dump_json(), record.id))
-                    return True
-            return False
+                    return record
+            return None
+
+    def consume(self, action: Action) -> bool:
+        return self.consume_approval(action) is not None
+
+    def find_effect(self, key: str) -> Effect | None:
+        with self.transaction() as db:
+            row = db.execute("SELECT record FROM effects WHERE idempotency_key=?", (key,)).fetchone()
+        return Effect.model_validate_json(row[0]) if row else None
 
     def propose_effect(self, action: Action, key: str) -> Effect:
         with self.transaction() as db:
@@ -186,11 +244,21 @@ class ActionStore:
         effect.updated_at = now_ms()
         db.execute("UPDATE effects SET record=? WHERE id=?", (effect.model_dump_json(), effect.id))
 
-    def start_effect(self, effect_id: str) -> Effect:
+    def start_effect(self, effect_id: str, *, approval_id: str | None = None, owner: EffectOwner | None = None) -> Effect:
         with self.transaction() as db:
             effect = self._effect(db, effect_id)
             if effect.state != "PROPOSED":
                 raise ValueError("Effect cannot be replayed; reconcile interrupted execution")
+            if effect.action.action_class == "consequential":
+                if approval_id is None:
+                    raise PermissionError("Consequential effect requires an exact consumed user approval")
+                approval = self._approval(db, approval_id)
+                if (approval.status != "CONSUMED" or approval.fingerprint != effect.fingerprint
+                        or approval.expires_at <= now_ms()):
+                    raise PermissionError("Effect approval does not authorize this action")
+                db.execute("INSERT INTO approval_uses VALUES (?,?)", (approval.id,effect.id))
+            effect.owner, effect.approval_id = owner, approval_id
+            self.validate_effect_owner(effect)
             effect.state = "STARTED"
             effect.generation += 1
             effect.token = uuid.uuid4().hex
@@ -203,11 +271,21 @@ class ActionStore:
             effect = self._effect(db, claimed.id)
             if (effect.generation, effect.token) != (claimed.generation, claimed.token) or not effect.token:
                 raise PermissionError("Stale effect ownership")
+            self.validate_effect_owner(effect)
             effect.state, effect.result = state, result
             effect.provider_reference = provider_reference or effect.provider_reference
             effect.token = None
             self._save_effect(db, effect)
             return effect
+
+    @staticmethod
+    def validate_effect_owner(effect: Effect) -> None:
+        if effect.owner:
+            from nanobot.session.responsibilities import ExecutionClaim, ResponsibilityStore
+            owner = effect.owner
+            ResponsibilityStore(Path(owner.workspace)).assert_owner(ExecutionClaim(
+                responsibility_id=owner.responsibility_id,wake_id=owner.wake_id,
+                generation=owner.generation,token=owner.token))
 
     def recover(self) -> int:
         """Gateway-exclusive startup; do not call while another gateway owns execution."""
@@ -222,11 +300,13 @@ class ActionStore:
                     count += 1
         return count
 
-    def claim_reconciliation(self, effect_id: str) -> Effect:
+    def claim_reconciliation(self, effect_id: str, *, owner: EffectOwner | None = None) -> Effect:
         with self.transaction() as db:
             effect = self._effect(db, effect_id)
             if effect.state != "UNCERTAIN":
                 raise ValueError("Only uncertain effects can be reconciled")
+            effect.owner = owner
+            self.validate_effect_owner(effect)
             effect.state, effect.token = "RECONCILING", uuid.uuid4().hex
             effect.generation += 1
             self._save_effect(db, effect)
@@ -256,13 +336,21 @@ class ActionPolicy:
         return Review(decision="ASK_USER", reason="Explicit user approval is required")
 
     async def authorize(self, action: Action) -> str | None:
+        _POLICY_APPROVAL.set(None)
         review = await self.decide(action)
         if review.decision == "ALLOW":
             return None
         if review.decision == "DENY":
             return review.reason
         store = self.store or ActionStore()
-        if store.consume(action):
+        effect_key = action.parameters.get("effect_key")
+        if isinstance(effect_key, str):
+            existing = store.find_effect(effect_key)
+            if existing and existing.fingerprint == action.fingerprint and existing.state != "PROPOSED":
+                return None  # Executor can only return/reconcile the existing effect, never resend.
+        consumed = store.consume_approval(action)
+        if consumed:
+            _POLICY_APPROVAL.set((action.fingerprint,consumed.id))
             return None
         approval = store.request(action)
         return (f"Waiting for approval: {approval.id}. {review.reason}. "

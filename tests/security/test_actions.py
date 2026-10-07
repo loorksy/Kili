@@ -75,7 +75,10 @@ from nanobot.security.actions import Action, ActionStore
 store=ActionStore(Path(sys.argv[1]))
 a=Action(tool="trade_execute", action_class="consequential", principal="webui:user", parameters={"account":"demo", "symbol":"GOLD", "volume":"0.1"})
 e=store.propose_effect(a,"request-1")
-store.start_effect(e.id)
+approval=store.request(a)
+store.resolve(approval.id,principal=a.principal,approve=True)
+store.consume(a)
+store.start_effect(e.id,approval_id=approval.id)
 os._exit(17)
 '''
     assert subprocess.run([sys.executable, "-c", script, str(path)]).returncode == 17
@@ -127,3 +130,29 @@ def test_secret_reference_not_value(tmp_path):
         store.resolve("../escape")
     with pytest.raises(ValueError, match="not configured"):
         store.resolve("missing")
+
+
+def test_effect_cannot_start_without_exact_consumed_approval(tmp_path):
+    store=ActionStore(tmp_path / "state.db")
+    effect=store.propose_effect(action(),"key")
+    with pytest.raises(PermissionError):
+        store.start_effect(effect.id)
+    changed=store.request(action(volume="2"))
+    store.resolve(changed.id,principal=action().principal,approve=True)
+    store.consume(changed.action)
+    with pytest.raises(PermissionError):
+        store.start_effect(effect.id,approval_id=changed.id)
+
+
+def test_approval_resolution_durably_wakes_once(tmp_path):
+    from nanobot.session.action_turns import queue_approval_resolutions
+    from nanobot.session.responsibilities import ResponsibilityStore
+    store=ActionStore(tmp_path / "state.db")
+    responsibilities=ResponsibilityStore(tmp_path)
+    approval=store.request(action())
+    store.resolve(approval.id,principal=action().principal,approve=True)
+    queue_approval_resolutions(responsibilities,store)
+    queue_approval_resolutions(responsibilities,store)
+    responsibility,=responsibilities.list()
+    assert list(responsibility.wakes)==[f"approval:{approval.id}"]
+    assert not store.pending_resolutions()

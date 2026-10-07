@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
-from nanobot.security.actions import Action, ActionPolicy
+from nanobot.security.actions import Action, ActionPolicy, action_authorization
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -211,10 +211,11 @@ class ToolRegistry:
             for execution in ctx.responsibility_scope.executions.values():
                 execution.store.assert_owner(execution.claim)
         principal = (ctx.session_key or f"{ctx.channel}:{ctx.chat_id}") if ctx else "gateway"
+        canonical = tool.action_parameters(params)
         action = Action.model_validate({
             "tool": tool.name, "action_class": tool.action_class,
-            "parameters": params, "principal": principal,
-            "responsibility_id": next(iter(ctx.responsibility_scope.executions), None) if ctx else None,
+            "parameters": canonical, "principal": principal,
+            "responsibility_id": canonical.get("responsibility_id", next(iter(ctx.responsibility_scope.executions), None) if ctx else None),
         })
         refusal = await self.policy.authorize(action)
         if refusal:
@@ -223,7 +224,8 @@ class ToolRegistry:
         if ctx:
             for execution in ctx.responsibility_scope.executions.values():
                 execution.store.assert_owner(execution.claim)
-        return await tool.execute(**params)
+        with action_authorization(action):
+            return await tool.execute(**params)
 
     @property
     def tool_names(self) -> list[str]:

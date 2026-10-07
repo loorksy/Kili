@@ -73,6 +73,7 @@ class TradePreview(RuntimeRecord):
 
     def material_action(self) -> dict[str, JsonValue]:
         return {"preview_id": self.id, "proposal_id": self.proposal_id,
+                "responsibility_id": self.responsibility_id,
                 "account_id": self.account_id, "canonical_instrument": self.canonical_instrument,
                 "broker_symbol": self.broker_symbol, "mapping_revision": self.mapping_revision,
                 "intent": self.intent.model_dump(mode="json"),

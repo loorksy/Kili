@@ -892,6 +892,17 @@ def _run_gateway(
     cron.register_deadline_source("responsibilities", _nearest_responsibility_deadline,
                                   _run_due_responsibilities)
     session_manager.responsibilities.on_change = cron.reschedule
+    from nanobot.security.actions import ActionStore, now_ms
+    from nanobot.session.action_turns import queue_approval_resolutions
+
+    action_journal = ActionStore()
+    async def _queue_resolved_actions() -> None:
+        queue_approval_resolutions(session_manager.responsibilities, action_journal)
+
+    cron.register_deadline_source("action_results",
+        lambda: now_ms() if action_journal.pending_resolutions() else None,
+        _queue_resolved_actions)
+
 
     cron.register_system_job(CronJob(
         id=RESPONSIBILITY_CRON_ID,

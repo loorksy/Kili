@@ -976,6 +976,8 @@ class GatewayHTTPHandler:
                 if not isinstance(approval_id, str) or not isinstance(approve, bool):
                     return _http_error(400, "Invalid approval resolution")
                 result = resolve_approval(principal, approval_id, approve)
+                from nanobot.session.action_turns import queue_approval_resolutions
+                queue_approval_resolutions(self.session_manager.responsibilities)
             elif path.endswith("/update"):
                 if payload is None or not isinstance(payload.get("operation"), dict):
                     return _http_error(400, "Invalid chart operation")

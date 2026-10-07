@@ -1077,6 +1077,8 @@ async def cmd_action_approval(ctx: CommandContext) -> OutboundMessage:
                 ctx.args.strip(), principal=ctx.key,
                 approve=ctx.raw.strip().split()[0] == "/approve",
             )
+            from nanobot.session.action_turns import queue_approval_resolutions
+            queue_approval_resolutions(ctx.loop.sessions.responsibilities)
             content = f"Action {record.status.lower()}: {record.id}."
         except (ValueError, PermissionError) as exc:
             content = str(exc)

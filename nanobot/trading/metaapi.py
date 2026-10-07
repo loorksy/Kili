@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, Valid
 
 from nanobot.market.models import Connection
 from nanobot.market.oanda import ProviderUnavailableError, parse_provider
+from nanobot.security.actions import ActionStore, Effect, current_authorized_action
 from nanobot.security.network import PinnedDNSAsyncTransport, httpx_env_proxy_mounts
 from nanobot.security.secrets import SecretStore
 
@@ -164,7 +165,16 @@ class MetaApiClient:
         except ValidationError:
             raise ProviderUnavailableError("MetaApi returned invalid history data") from None
 
-    async def mutate(self, payload: dict[str, JsonValue]) -> TradeResponse:
+    async def mutate(self, payload: dict[str, JsonValue], *, effect: Effect, journal: ActionStore) -> TradeResponse:
+        grant = current_authorized_action()
+        owned = journal.get_effect(effect.id)
+        if (grant is None or grant.action.fingerprint != effect.fingerprint
+                or owned.token != effect.token or owned.generation != effect.generation
+                or owned.state != "STARTED" or not owned.approval_id
+                or grant.action.parameters.get("broker_request") != payload
+                or grant.action.parameters.get("account_id") != self.connection.account_id):
+            raise PermissionError("MetaApi mutation lacks exact gateway effect authorization")
+        journal.validate_effect_owner(owned)
         # Numeric JSON is encoded from validated decimal strings without float conversion.
         numeric = {"volume", "openPrice", "stopLoss", "takeProfit"}
         fields: list[str] = []

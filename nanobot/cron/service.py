@@ -139,6 +139,7 @@ class CronService:
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task[None] | None = None
         self._running = False
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
         self._active_executions = 0
         self._store_dirty = False
         self.max_sleep_ms = max_sleep_ms
@@ -436,6 +437,7 @@ class CronService:
 
     async def start(self) -> None:
         """Start the cron service."""
+        self._owner_loop = asyncio.get_running_loop()
         self._running = True
         loaded = self._load_store()
         if loaded is None:
@@ -482,7 +484,8 @@ class CronService:
 
     def reschedule(self) -> None:
         """Wake/recalculate the existing timer when durable scheduling state changes."""
-        self._arm_timer()
+        if self._owner_loop and not self._owner_loop.is_closed():
+            self._owner_loop.call_soon_threadsafe(self._arm_timer)
 
     def _get_next_wake_ms(self) -> int | None:
         times = [j.state.next_run_at_ms for j in self._store.jobs

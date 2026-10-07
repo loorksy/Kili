@@ -209,6 +209,18 @@ class ResponsibilityStore:
             self._commit(record)
             return True
 
+    def enqueue_user_resolution(self, responsibility_id: str, wake_id: str, content: str) -> bool:
+        """Trusted approval/event adapter releases user waiting without minting ownership."""
+        with self._lock:
+            record = self.get(responsibility_id)
+            if record.state in TERMINAL_STATES or wake_id in record.wakes:
+                return False
+            if record.state == "WAITING_FOR_USER" and not record.recovery_required:
+                record.state, record.waiting_for = "WAITING", None
+            record.wakes[wake_id] = WakeReceipt(content=content[:8000])
+            self._commit(record)
+            return True
+
     def claim(self, responsibility_id: str, wake_id: str) -> ExecutionClaim | None:
         """Atomic admission; a STARTED receipt is never automatically replayed."""
         with self._lock:
