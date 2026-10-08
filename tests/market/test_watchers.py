@@ -29,3 +29,25 @@ async def test_cheap_crossing_persists_one_wake(tmp_path):
     assert client.quote.await_count == 2 and watchers.nearest() is None
     restarted = RecordStore("watchers", MarketWatcher, ActionStore(tmp_path / "state.db"))
     assert restarted.get("watch_1").fired
+
+
+async def test_completed_candle_wakes_once_after_restart_and_coalesces_downtime(tmp_path):
+    from nanobot.market.models import Candle
+    responsibilities = ResponsibilityStore(tmp_path)
+    parent = responsibilities.create(objective="New gold candle", session_key=None, channel="", chat_id="")
+    records = RecordStore("watchers", MarketWatcher, ActionStore(tmp_path / "state.db"))
+    records.create(MarketWatcher(id="watch_candle", responsibility_id=parent.id,
+        provider_instrument="XAU_USD", canonical_instrument="gold-usd", condition="new_completed_candle",
+        timeframe="H1", interval_ms=1000, next_check_ms=0))
+    def candle(time):
+        return Candle(canonical_instrument="gold-usd", provider_instrument="XAU_USD", time=time,
+                      open="2700", high="2701", low="2699", close="2700", complete=True, source="oanda",
+                      fetched_at=datetime.now(timezone.utc))
+    client = AsyncMock()
+    client.candles.side_effect = [[candle("2026-10-07T10:00:00Z")], [candle("2026-10-07T14:00:00Z")]]
+    await MarketWatchers(client, responsibilities, records).run_due(100)
+    assert not responsibilities.get(parent.id).wakes
+    await MarketWatchers(client, responsibilities, records).run_due(10000)
+    await MarketWatchers(client, responsibilities, records).run_due(20000)
+    assert list(responsibilities.get(parent.id).wakes) == ["market:watch_candle"]
+    assert client.candles.await_count == 2 and client.quote.await_count == 0

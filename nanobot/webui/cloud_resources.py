@@ -1,8 +1,6 @@
 """Existing authenticated HTTP snapshots and WebSocket mutations for chart resources."""
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 from nanobot.agent.tools.chart import ChartRequest, ChartTool
@@ -11,7 +9,8 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.charts.state import ChartActor, ChartService
 from nanobot.config.schema import Config
-from nanobot.market.oanda import OandaClient
+from nanobot.market.cache import MarketCache
+from nanobot.market.oanda import OandaClient, ProviderUnavailableError
 from nanobot.security.actions import ActionStore
 from nanobot.session.manager import SessionManager
 
@@ -26,12 +25,21 @@ async def chart_snapshot(config: Config, chart_id: str, principal: str,
         return chart.model_dump(mode="json")
     if config.tools.integrations.oanda is None:
         raise ValueError("OANDA connection is not configured")
-    data = await OandaClient(config.tools.integrations.oanda).candles(
-        chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=count, before=before)
-    serialized = [c.model_dump(mode="json") for c in data]
-    revision = hashlib.sha256(json.dumps(serialized, sort_keys=True).encode()).hexdigest()
-    return {"candles": serialized, "data_revision": revision, "chart_id": chart.id,
-            "timeframe": chart.timeframe, "before": before}
+    cache = MarketCache()
+    stale = False
+    try:
+        data = await OandaClient(config.tools.integrations.oanda).candles(
+            chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=count, before=before)
+    except ProviderUnavailableError:
+        stale = True
+        series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
+        data = cache.page(series, count, before)
+        if not data:
+            raise ValueError("Market history is unavailable") from None
+    series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
+    return {"candles": [c.model_dump(mode="json") for c in data], "data_revision": series.data_revision,
+            "chart_id": chart.id, "timeframe": chart.timeframe, "before": before, "stale": stale}
+
 
 
 async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus,

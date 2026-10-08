@@ -30,6 +30,8 @@ export function CloudChart({ reference }: { reference: string }) {
   useEffect(() => {
     if (!chart || !container.current || !chartId || !sessionKey) return;
     let closed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopFeed = () => { if (timer) clearTimeout(timer); timer = undefined; };
     const feed: Datafeed = {
       searchSymbols: async () => [{ ticker: chart.provider_instrument, name: chart.canonical_instrument }],
       getHistoryKLineData: async (_symbol, _period, _from, to) => {
@@ -38,10 +40,28 @@ export function CloudChart({ reference }: { reference: string }) {
         return page.candles.map(c => ({ timestamp: Date.parse(c.time), open: Number(c.open), high: Number(c.high),
           low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 }));
       },
-      subscribe: () => {}, unsubscribe: () => {},
+      subscribe: (_symbol, _period, callback) => {
+        stopFeed();
+        const refresh = async () => {
+          if (closed) return;
+          try {
+            if (!document.hidden) {
+              const page = await fetchChartCandles(token, chartId, sessionKey, undefined, 2);
+              if (!closed) {
+                for (const c of page.candles) callback({ timestamp: Date.parse(c.time), open: Number(c.open),
+                  high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 });
+                setError(page.stale ? "Showing cached market data; provider unavailable." : "");
+              }
+            }
+          } catch { if (!closed) setError("Market updates unavailable. Retrying…"); }
+          if (!closed) timer = setTimeout(() => void refresh(), 30_000);
+        };
+        timer = setTimeout(() => void refresh(), 30_000);
+      },
+      unsubscribe: stopFeed,
     };
     const destroy = mountCloudChart(container.current, chart, feed);
-    return () => { closed = true; destroy(); };
+    return () => { closed = true; stopFeed(); destroy(); };
   }, [chart, chartId, sessionKey, token]);
   async function change(operation: Record<string, unknown>) {
     if (!chart || !sessionKey) return;

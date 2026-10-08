@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
@@ -60,8 +61,21 @@ class GoalInputScope(ExitStack):
             or message.channel == "system"
             or message.sender_id == "subagent"
             or internal_continuation_inbound(message.metadata)
-            or message.metadata.get("goal_requested") is not True
         ):
             return False
         _, automation_metadata = automation_history_overrides(message.metadata)
-        return not automation_metadata
+        if automation_metadata:
+            return False
+        # Fresh user intent only: neither stored history nor provider/tool text can grant this.
+        return message.metadata.get("goal_requested") is True or persistent_request(message.content)
+
+
+def persistent_request(content: str) -> bool:
+    """Recognize explicit background intent; the model still resolves the schedule."""
+    text = content.strip()
+    return bool(re.search(
+        r"^(?:please\s+)?(?:monitor\b|watch\b|remind me\b|notify me when\b|tell me when\b|"
+        r"send me .+ (?:at |after |every )|every (?:morning|evening|day|week)\b|"
+        r"راقب|راقبي|ذكرني|ذكّرني|أخبرني عندما|بلغني عندما|أرسل .+ (?:الساعة|بعد|كل))",
+        text, re.IGNORECASE,
+    ))

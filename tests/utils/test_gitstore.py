@@ -69,7 +69,8 @@ class TestNestedRepoProtection:
         """init() should detect it's inside an existing git repo and refuse."""
         project = tmp_path / "project"
         project.mkdir()
-        (project / ".git").mkdir()
+        from dulwich import porcelain
+        porcelain.init(str(project))
 
         workspace = project / "workspace"
         workspace.mkdir()

@@ -11,6 +11,7 @@ from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import Indel
@@ -183,7 +184,7 @@ async def test_runner_emits_write_file_diff_from_tool_execution_snapshots(tmp_pa
     align = MagicMock(wraps=Indel.opcodes)
     monkeypatch.setattr(Indel, "opcodes", align)
 
-    class Tools:
+    class Tools(ToolRegistry):
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
 
@@ -264,7 +265,7 @@ async def test_runner_reuses_edit_diff_for_summary_and_progress(tmp_path, monkey
     align = MagicMock(wraps=Indel.opcodes)
     monkeypatch.setattr(Indel, "opcodes", align)
 
-    class Tools:
+    class Tools(ToolRegistry):
         def get_definitions(self):
             return [{"type": "function", "function": {"name": tool_name}}]
 
@@ -330,7 +331,7 @@ async def test_runner_marks_file_edit_activity_failed_when_tool_errors(tmp_path)
 
     tool = WriteFileTool(workspace=tmp_path)
 
-    class Tools:
+    class Tools(ToolRegistry):
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
 
@@ -394,7 +395,7 @@ async def test_runner_marks_file_edit_activity_failed_when_cancelled(tmp_path):
 
     tool = SlowWriteTool(workspace=tmp_path)
 
-    class Tools:
+    class Tools(ToolRegistry):
         def get_definitions(self):
             return [{"type": "function", "function": {"name": "write_file"}}]
 

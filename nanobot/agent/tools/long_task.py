@@ -220,7 +220,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Create one sustained goal for the current session when Goal Runtime Guidance asks "
+            "Create an independently durable responsibility linked to this conversation when Goal Runtime Guidance asks "
             "you to record it. Consolidate relevant prior discussion into a durable objective "
             "that is self-contained, bounded, safe under repetition, and explicit about "
             "completion criteria. Do not retry after a successful creation."
@@ -241,7 +241,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         if prior and prior.get("responsibility_id"):
             record = self._sessions.responsibilities.get(prior["responsibility_id"])
             session.metadata[GOAL_STATE_KEY] = {**prior, **record.goal_projection()}
-        goal_start_requested = explicit_goal_requested(request.metadata)
+        goal_start_requested = explicit_goal_requested(request.metadata) or goal_mutation_allowed()
         goal_active = sustained_goal_active(session.metadata)
         if not goal_start_requested and not goal_active and not (prior and prior.get("responsibility_id")):
             return None

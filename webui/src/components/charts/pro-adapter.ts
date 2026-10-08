@@ -5,29 +5,41 @@ import "@klinecharts/pro/dist/klinecharts-pro.css";
 import type { CloudChartState } from "./contract";
 
 export function mountCloudChart(container: HTMLElement, state: CloudChartState, datafeed: Datafeed): () => void {
-  const units: Record<string, [number, string]> = {
-    M1: [1, "minute"], M5: [5, "minute"], M15: [15, "minute"], M30: [30, "minute"],
-    H1: [1, "hour"], H4: [4, "hour"], D: [1, "day"], W: [1, "week"], M: [1, "month"],
-  };
-  const [multiplier, timespan] = units[state.timeframe] ?? [1, "hour"];
+  const calendar: Record<string, [number, string]> = { D: [1, "day"], W: [1, "week"], M: [1, "month"] };
+  const unit = /^([SMH])(\d+)$/.exec(state.timeframe);
+  const units: Record<string, string> = { S: "second", M: "minute", H: "hour" };
+  const [multiplier, timespan] = calendar[state.timeframe] ?? (unit ? [Number(unit[2]), units[unit[1]]] : [1, "hour"]);
   const period = { multiplier, timespan, text: state.timeframe };
   const pro = new KLineChartPro({ container, symbol: { ticker: state.provider_instrument, name: state.canonical_instrument },
-    period, periods: [period], timezone: "UTC", locale: "en-US", mainIndicators: [], subIndicators: [],
-    drawingBarVisible: false, datafeed });
+    period, periods: [period], timezone: "UTC", locale: "en-US", mainIndicators: state.studies.filter(name => ["MA", "EMA", "BOLL", "SAR"].includes(name)), subIndicators: state.studies.filter(name => !["MA", "EMA", "BOLL", "SAR"].includes(name)),
+    drawingBarVisible: false, datafeed: { ...datafeed, getHistoryKLineData: async (...args) => {
+      const data = await datafeed.getHistoryKLineData(...args);
+      const range = state.visible_range;
+      if (range) window.setTimeout(() => {
+        if (disposed) return;
+        const core = getCore();
+        const [from, to] = range;
+        const visible = data.filter(candle => candle.timestamp >= from && candle.timestamp <= to);
+        if (core && visible.length) { core.setBarSpace(container.clientWidth / visible.length); core.scrollToTimestamp(to, 0); }
+      }, 0);
+      return data;
+    } } });
   let disposed = false;
-  const timer = window.setTimeout(() => {
-    if (disposed) return;
+  const getCore = () => {
     const widget = container.querySelector<HTMLElement>(".klinecharts-pro-widget");
     const coreId = widget?.getAttribute("k-line-chart-id");
-    // v9 init returns its cached instance by DOM id; Pro sets the attribute.
     if (widget && coreId) widget.id = coreId;
-    const core = widget && coreId ? init(widget) : null;
+    return widget && coreId ? init(widget) : null;
+  };
+  const timer = window.setTimeout(() => {
+    if (disposed) return;
+    const core = getCore();
     if (!core) return;
     for (const annotation of state.annotations) {
-      const names: Record<string, string> = { horizontal_line: "horizontalStraightLine", trend_line: "segment", price_zone: "rect" };
+      const names: Record<string, string> = { horizontal_line: "horizontalStraightLine", trend_line: "segment", price_zone: "rect", marker: "simpleAnnotation", note: "simpleAnnotation", entry: "simpleTag", stop: "simpleTag", target: "simpleTag" };
       core.createOverlay({ id: annotation.id, name: names[annotation.type] ?? "horizontalStraightLine", lock: true,
         points: annotation.points.map(point => ({ timestamp: point.timestamp ?? Date.now(), value: Number(point.value) })),
-        extendData: { text: annotation.text } });
+        extendData: annotation.text });
     }
   }, 0);
   return () => {

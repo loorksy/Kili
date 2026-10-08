@@ -5,7 +5,7 @@ import uuid
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from nanobot.market.oanda import GRANULARITIES
 from nanobot.security.actions import now_ms
@@ -29,6 +29,16 @@ class Annotation(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+    revision: int = 0
+    updated_by: str | None = None
+
+    @model_validator(mode="after")
+    def geometry(self) -> Annotation:
+        if self.type in {"trend_line", "price_zone"} and len(self.points) != 2:
+            raise ValueError("This annotation requires two points")
+        if self.type == "trend_line" and any(point.timestamp is None for point in self.points):
+            raise ValueError("Trend line requires explicit timestamps")
+        return self
 
 
 class CloudChart(RuntimeRecord):
@@ -42,7 +52,7 @@ class CloudChart(RuntimeRecord):
     timeframe: str
     visible_range: tuple[int, int] | None = None
     layout: dict[str, JsonValue] = Field(default_factory=dict)
-    studies: list[str] = Field(default_factory=list)
+    studies: list[str] = Field(default_factory=list, max_length=20)
     annotations: list[Annotation] = Field(default_factory=list, max_length=500)
     annotation_revision: int = 0
     data_revision: str = ""
@@ -81,6 +91,11 @@ class ChartService:
     def get(self, chart_id: str, actor: ChartActor) -> CloudChart:
         chart = self.records.get(chart_id)
         self.require_access(chart, actor)
+        from nanobot.market.cache import MarketCache
+        try:
+            chart.data_revision = MarketCache().get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe).data_revision
+        except ValueError:
+            pass
         return chart
 
     def create(self, actor: ChartActor, canonical: str, symbol: str, timeframe: str,
@@ -114,4 +129,5 @@ class ChartService:
             raise ValueError("Unsupported chart timeframe")
         if chart.visible_range and chart.visible_range[0] >= chart.visible_range[1]:
             raise ValueError("Invalid visible range")
-        return self.records.save(chart)
+        validated = CloudChart.model_validate(chart.model_dump())
+        return self.records.save(validated)

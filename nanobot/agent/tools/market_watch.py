@@ -21,8 +21,9 @@ class _WatchRequest(BaseModel):
     watcher_id: str | None = None
     provider_instrument: str | None = None
     canonical_instrument: str | None = None
-    condition: Literal["above", "below", "cross_above", "cross_below"] = "above"
+    condition: Literal["above", "below", "cross_above", "cross_below", "new_completed_candle"] = "above"
     threshold: str | None = None
+    timeframe: str = "H1"
     interval_ms: int = Field(default=60_000, ge=1000)
 
 
@@ -38,7 +39,7 @@ class MarketWatchTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Create a deterministic price condition for a durable responsibility. Quotes do not invoke the model; the satisfied condition wakes it once."
+        return "Create a deterministic price or new-completed-candle condition for a durable responsibility. Quotes do not invoke the model; the satisfied condition wakes it once."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -64,13 +65,13 @@ class MarketWatchTool(Tool):
             return json.dumps([w.model_dump(mode="json") for w in self.records.list()
                                if w.responsibility_id == request.responsibility_id])
         if request.operation == "create":
-            if not request.provider_instrument or not request.canonical_instrument or request.threshold is None:
+            if not request.provider_instrument or not request.canonical_instrument or (request.threshold is None and request.condition != "new_completed_candle"):
                 raise ValueError("Condition requires explicit instruments and threshold")
             watcher = MarketWatcher.model_validate({
                 "id": "watch_" + uuid.uuid4().hex, "responsibility_id": request.responsibility_id,
                 "provider_instrument": request.provider_instrument,
                 "canonical_instrument": request.canonical_instrument,
-                "condition": request.condition, "threshold": request.threshold,
+                "condition": request.condition, "threshold": request.threshold, "timeframe": request.timeframe,
                 "interval_ms": request.interval_ms, "next_check_ms": now_ms(),
             })
             self.records.create(watcher)

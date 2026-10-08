@@ -38,6 +38,7 @@ import {
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
+import { IntegrationSettings } from "@/components/settings/system/IntegrationSettings";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -634,6 +635,7 @@ export function SettingsPage({
               onApiServiceAction={handleApiServiceAction}
               onInstallCapability={(name) => void installCapabilities([name])}
             />
+            <IntegrationSettings />
           </div>
         );
       case "memory":

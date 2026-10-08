@@ -191,7 +191,7 @@ class TestToolEventProgress:
         target.write_text("old\n", encoding="utf-8")
         prepare_file_edit_trackers = MagicMock()
 
-        class ObservableWriteTool:
+        class ObservableWriteTool(WriteFileTool):
             name = "write_file"
 
             async def execute(self, path: str, content: str) -> str:

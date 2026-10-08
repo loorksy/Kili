@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import (
     RequestContext,
     bind_request_context,
@@ -21,7 +22,9 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 
 
-class _ContextRecordingTool:
+class _ContextRecordingTool(Tool):
+    description = "Record context"
+    parameters = {"type": "object"}
     name = "cron"
     concurrency_safe = False
 
@@ -42,8 +45,9 @@ class _ContextRecordingTool:
         return "created"
 
 
-class _Tools:
+class _Tools(ToolRegistry):
     def __init__(self, tool: _ContextRecordingTool) -> None:
+        super().__init__()
         self.tool = tool
 
     @property

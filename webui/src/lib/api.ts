@@ -1360,10 +1360,10 @@ export function fetchCloudChart(token: string, chartId: string, sessionKey: stri
   return request<import("@/components/charts/contract").CloudChartState>(
     `/api/webui/cloud-charts?chart_id=${encodeURIComponent(chartId)}&session_key=${encodeURIComponent(sessionKey)}`, token);
 }
-export function fetchChartCandles(token: string, chartId: string, sessionKey: string, before?: string) {
-  const query = new URLSearchParams({ chart_id: chartId, session_key: sessionKey, count: "500" });
+export function fetchChartCandles(token: string, chartId: string, sessionKey: string, before?: string, count = 500) {
+  const query = new URLSearchParams({ chart_id: chartId, session_key: sessionKey, count: String(count) });
   if (before) query.set("before", before);
-  return request<{ candles: { time: string; open: string; high: string; low: string; close: string; volume: number | null }[]; data_revision: string }>(`/api/webui/cloud-charts/candles?${query}`, token);
+  return request<{ candles: { time: string; open: string; high: string; low: string; close: string; volume: number | null }[]; data_revision: string; stale?: boolean }>(`/api/webui/cloud-charts/candles?${query}`, token);
 }
 export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: string, operation: Record<string, unknown>) {
   return mutation<import("@/components/charts/contract").CloudChartState>(transport, "chart.update", { session_key: sessionKey, operation });
@@ -1386,4 +1386,9 @@ export function configureIntegration(transport: WebUIMutationTransport, values: 
 }
 export function configureInstrumentMapping(transport: WebUIMutationTransport, values: Record<string, unknown>) {
   return mutation<Record<string, unknown>>(transport, "settings.integrations.map", values);
+}
+
+export function fetchActionApproval(token: string, sessionKey: string, approvalId: string) {
+  const query = new URLSearchParams({ session_key: sessionKey, approval_id: approvalId });
+  return request<{ id: string; status: string; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
 }

@@ -515,6 +515,7 @@ class SubagentManager:
             exec=self.tools_config.exec,
             web=self.tools_config.web,
             file=self.tools_config.file,
+            integrations=self.tools_config.integrations.model_copy(deep=True),
             restrict_to_workspace=self.restrict_to_workspace,
         )
 
@@ -530,6 +531,7 @@ class SubagentManager:
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(
             config=cfg,
+            bus=self.bus,
             workspace=str(root.resolve()),
             exec_session_manager=exec_manager or self._exec_session_manager,
             file_state_store=FileStates(),

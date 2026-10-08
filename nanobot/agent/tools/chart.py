@@ -17,7 +17,7 @@ from nanobot.security.actions import now_ms
 
 class ChartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations"]
+    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "set_studies", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations"]
     chart_id: str | None = None
     expected_revision: int | None = None
     canonical_instrument: str | None = None
@@ -25,6 +25,7 @@ class ChartRequest(BaseModel):
     timeframe: str | None = None
     owner_scope: Literal["MAIN", "SHARED", "WORKER", "RESPONSIBILITY"] = "MAIN"
     visible_range: tuple[int, int] | None = None
+    studies: list[Literal["MA", "EMA", "BOLL", "SAR", "VOL", "MACD", "KDJ", "RSI", "CCI", "DMI", "ATR", "OBV"]] | None = None
     annotation_id: str | None = None
     annotation_type: Literal["horizontal_line", "trend_line", "price_zone", "marker", "note", "entry", "stop", "target"] = "note"
     points: list[ChartPoint] | None = None
@@ -106,6 +107,10 @@ class ChartTool(Tool):
                 chart.data_revision = ""
             elif request.operation == "set_visible_range":
                 chart.visible_range = request.visible_range
+            elif request.operation == "set_studies":
+                if request.studies is None:
+                    raise ValueError("Structured studies are required")
+                chart.studies = list(request.studies)
             else:
                 chart.annotation_revision += 1
                 if request.operation == "clear_annotations":
@@ -123,6 +128,10 @@ class ChartTool(Tool):
                         if existing is None:
                             raise ValueError("Unknown annotation")
                         annotation.id, annotation.created_at = existing.id, existing.created_at
+                        annotation.created_by = existing.created_by
+                        annotation.responsibility_id = existing.responsibility_id
+                        annotation.updated_by = actor.worker_id or actor.principal
+                        annotation.revision = existing.revision + 1
                         annotation.updated_at = now_ms()
                         chart.annotations = [annotation if a.id == existing.id else a for a in chart.annotations]
                     else:

@@ -623,7 +623,7 @@ class GatewayHTTPHandler:
             return response
 
         if got in {"/api/webui/cloud-charts", "/api/webui/cloud-charts/candles",
-                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals/resolve"}:
+                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve"}:
             return await self._handle_cloud_resource(request, got)
 
         # Recovery routes
@@ -978,6 +978,10 @@ class GatewayHTTPHandler:
                 result = resolve_approval(principal, approval_id, approve)
                 from nanobot.session.action_turns import queue_approval_resolutions
                 queue_approval_resolutions(self.session_manager.responsibilities)
+            elif path == "/api/webui/action-approvals":
+                from nanobot.security.actions import ActionStore
+                approval_id = (query.get("approval_id") or [""])[0]
+                result = ActionStore().read_approval(approval_id, principal)
             elif path.endswith("/update"):
                 if payload is None or not isinstance(payload.get("operation"), dict):
                     return _http_error(400, "Invalid chart operation")

@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from nanobot.market.models import Quote
-from nanobot.market.oanda import OandaClient, ProviderUnavailableError
+from nanobot.market.oanda import GRANULARITIES, OandaClient, ProviderUnavailableError
 from nanobot.session.records import RecordStore, RuntimeRecord
 from nanobot.session.responsibilities import ResponsibilityStore
 
@@ -17,8 +18,10 @@ class MarketWatcher(RuntimeRecord):
     responsibility_id: str
     provider_instrument: str
     canonical_instrument: str
-    condition: Literal["above", "below", "cross_above", "cross_below"]
-    threshold: Decimal
+    condition: Literal["above", "below", "cross_above", "cross_below", "new_completed_candle"]
+    threshold: Decimal | None = None
+    timeframe: str = "H1"
+    last_completed_time: datetime | None = None
     interval_ms: int = Field(default=60_000, ge=1000)
     next_check_ms: int
     last_price: Decimal | None = None
@@ -26,6 +29,15 @@ class MarketWatcher(RuntimeRecord):
     fired: bool = False
     observation: Quote | None = None
     failures: int = 0
+
+    @model_validator(mode="after")
+    def check_condition(self) -> MarketWatcher:
+        OandaClient.validate_symbol(self.provider_instrument)
+        if self.condition != "new_completed_candle" and self.threshold is None:
+            raise ValueError("Price conditions require a threshold")
+        if self.timeframe not in GRANULARITIES:
+            raise ValueError("Unsupported watcher timeframe")
+        return self
 
 
 class MarketWatchers:
@@ -49,6 +61,24 @@ class MarketWatchers:
                 watcher.active = False
                 self.records.save(watcher)
                 continue
+            if watcher.condition == "new_completed_candle":
+                try:
+                    candles = await self.client.candles(watcher.provider_instrument,
+                        watcher.canonical_instrument, watcher.timeframe, count=2)
+                    latest = max((c.time for c in candles if c.complete), default=None)
+                    if latest is not None:
+                        if watcher.last_completed_time is not None and latest > watcher.last_completed_time:
+                            self.responsibilities.enqueue(watcher.responsibility_id, f"market:{watcher.id}",
+                                f"New completed {watcher.timeframe} candle on {watcher.provider_instrument} at {latest.isoformat()}.")
+                            watcher.active, watcher.fired = False, True
+                        watcher.last_completed_time = latest
+                    watcher.failures = 0
+                except ProviderUnavailableError:
+                    watcher.failures += 1
+                watcher.next_check_ms = now + min(3_600_000, watcher.interval_ms * 2 ** min(watcher.failures, 6))
+                self.records.save(watcher)
+                continue
+            assert watcher.threshold is not None
             try:
                 quote = quotes.get(watcher.provider_instrument)
                 if quote is None:

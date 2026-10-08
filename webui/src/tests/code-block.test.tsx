@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { ThemeProvider } from "@/hooks/useTheme";
@@ -42,6 +42,10 @@ vi.mock("react-syntax-highlighter/dist/esm/styles/prism/one-light", () => ({
 }));
 
 describe("CodeBlock", () => {
+  // Compile the real lazy dependency before measuring UI behavior. Under a
+  // concurrent full-suite run, cold transformation can exceed findBy's budget.
+  beforeAll(async () => { await import("@/components/ViewportCodeRows"); });
+
   it("renders and copies a large code block in full without pagination", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);

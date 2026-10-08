@@ -45,14 +45,14 @@ export function IntegrationSettings() {
       <SettingsRow title="Connection" description="OANDA supplies analysis data. MetaApi supplies the broker account. Credentials are stored privately.">
         <select value={provider} onChange={e => setProvider(e.target.value as "oanda" | "metaapi")}><option value="oanda">OANDA</option><option value="metaapi">MetaApi</option></select>
       </SettingsRow>
-      <SettingsRow title="Account"><Input aria-label="Connection account" value={account} onChange={e => setAccount(e.target.value)} placeholder={status?.[provider].account_id ?? "Account ID"} /></SettingsRow>
-      <SettingsRow title="Credential" description={status?.[provider].configured ? "Stored credential will remain unless replaced." : undefined}>
+      <SettingsRow title="Account"><Input aria-label="Connection account" value={account} onChange={e => setAccount(e.target.value)} placeholder={status?.[provider]?.account_id ?? "Account ID"} /></SettingsRow>
+      <SettingsRow title="Credential" description={status?.[provider]?.configured ? "Stored credential will remain unless replaced." : undefined}>
         <Input aria-label="Connection credential" type="password" autoComplete="new-password" value={credential} onChange={e => setCredential(e.target.value)} placeholder="Token" />
       </SettingsRow>
       {provider === "metaapi" ? <SettingsRow title="Account region"><Input value={region} onChange={e => setRegion(e.target.value)} /></SettingsRow>
         : <SettingsRow title="Environment"><select value={environment} onChange={e => setEnvironment(e.target.value)}><option value="practice">Practice</option><option value="live">Live data</option></select></SettingsRow>}
-      <SettingsRow title="Save connection"><Button disabled={busy || !account} onClick={() => void save()}>Save</Button></SettingsRow>
-      {status?.metaapi.configured && <>
+      <SettingsRow title="Save connection"><Button disabled={busy || !account} onClick={() => void save()}>Save connection</Button></SettingsRow>
+      {status?.metaapi?.configured && <>
         <SettingsRow title="Canonical instrument"><Input value={canonical} onChange={e => setCanonical(e.target.value)} /></SettingsRow>
         <SettingsRow title="Exact broker symbol"><Input value={symbol} onChange={e => setSymbol(e.target.value)} placeholder="GOLD / XAUUSDm / …" /></SettingsRow>
         <SettingsRow title="Verify mapping" description="Confirm that this broker symbol represents the intended instrument."><Button disabled={busy || !symbol || !canonical} onClick={() => void map()}>Confirm and verify</Button></SettingsRow>

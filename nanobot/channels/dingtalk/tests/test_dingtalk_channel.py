@@ -1341,3 +1341,14 @@ async def test_remote_media_stops_reading_at_limit_and_closes_stream(monkeypatch
         channel._http = client
         assert await channel._fetch_remote_media_bytes("https://example.com/large") == (None, None)
     assert body.closed
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_public_media_dns(monkeypatch):
+    import socket
+    original = socket.getaddrinfo
+    def resolve(host, port, *args, **kwargs):
+        if host in {"example.com", "example.org"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port or 443))]
+        return original(host, port, *args, **kwargs)
+    monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", resolve)

@@ -13,7 +13,7 @@ from nanobot.trading.proposals import TradeIntent, TradeProposals
 
 class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "get", "preview"]
+    operation: Literal["create", "get", "preview", "journal"]
     proposal_id: str | None = None
     intent: TradeIntent | None = None
     rationale_summary: str = ""
@@ -65,4 +65,14 @@ class TradePrepareTool(Tool):
             return (await self.service.preview(request.proposal_id,context.session_key)).model_dump_json()
         proposal = self.service.proposals.get(request.proposal_id)
         self.service.require_owner(context.session_key,proposal.principal)
+        if request.operation == "journal":
+            import json
+
+            from nanobot.session.records import RecordStore
+            from nanobot.trading.execution import TradeJournalEntry
+            entries = RecordStore("trade_journal", TradeJournalEntry, self.service.proposals.journal).list()
+            approvals = self.service.proposals.journal.approvals_for_proposal(proposal.id)
+            return json.dumps({"proposal": proposal.model_dump(mode="json"),
+                "entries": [entry.model_dump(mode="json") for entry in entries if entry.proposal_id == proposal.id],
+                "approvals": [approval.model_dump(mode="json") for approval in approvals]})
         return proposal.model_dump_json()
