@@ -42,9 +42,15 @@ def test_chart_restart_concurrency_and_private_shared_permissions(tmp_path):
 
 
 async def test_structured_chart_tool_mutations_and_contract(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.market.models import Connection
     charts = service(tmp_path)
     monkeypatch.setattr("nanobot.agent.tools.chart.ChartService",lambda:charts)
     ctx = ToolContext(config=ToolsConfig(),workspace=str(tmp_path))
+    ctx.config.integrations.metaapi = Connection(secret_ref="test", account_id="practice")
+    monkeypatch.setattr("nanobot.market.broker.BrokerMarket.verify", AsyncMock())
+    monkeypatch.setattr("nanobot.market.broker.BrokerMarket.timeframes", AsyncMock(return_value=("H1", "H4")))
     tool = ChartTool(ctx)
     with request_context(RequestContext(channel="websocket",chat_id="main",session_key="websocket:main")):
         result = await tool.execute(operation="create",canonical_instrument="gold-usd",provider_instrument="XAU_USD",timeframe="H1")

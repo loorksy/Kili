@@ -10,10 +10,12 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.queue import MessageBus
 from nanobot.charts.state import ChartActor, ChartService
 from nanobot.config.schema import Config
-from nanobot.market.cache import MarketCache
-from nanobot.market.oanda import OandaClient, ProviderUnavailableError
+from nanobot.market.broker import BrokerMarket
+from nanobot.market.cache import CandleSeries, MarketCache
+from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import ActionStore
 from nanobot.session.manager import SessionManager
+from nanobot.trading.accounts import TradingAccounts
 
 
 async def list_charts(config: Config, principal: str) -> dict[str, object]:
@@ -30,11 +32,13 @@ async def list_charts(config: Config, principal: str) -> dict[str, object]:
         rows.append(dict(chart.contract()))
     instruments: list[dict[str, str]] = []
     market_unavailable = False
-    connection = config.tools.integrations.oanda
-    if connection is not None:
+    if config.tools.integrations.broker_accounts():
         try:
-            instruments = [{"name": item.name, "display_name": item.display_name} for item in await OandaClient(connection).instruments()]
-        except ProviderUnavailableError:
+            market = BrokerMarket(TradingAccounts(config.tools.integrations).client(principal=principal))
+            instruments = [{"name": item.name, "display_name": item.display_name,
+                            "canonical_instrument": item.canonical_instrument, "account_id": item.account_id}
+                           for item in await market.instruments()]
+        except (ProviderUnavailableError, ValueError):
             market_unavailable = True
     return {"charts": rows, "instruments": instruments, "market_unavailable": market_unavailable}
 
@@ -63,12 +67,18 @@ async def chart_snapshot(config: Config, chart_id: str, principal: str,
             state["computed_series"] = [series.model_dump(mode="json") for series in scene.series]
             state["computed_timestamps"] = [candle_time(c) for c in scene.candles]
         return state
-    if config.tools.integrations.oanda is None:
-        raise ValueError("OANDA connection is not configured")
-    cache = MarketCache()
+    if chart.provider != "metaapi" or chart.account_id is None:
+        # Preserve read-only historical access under the old source identity;
+        # never fetch OANDA or attach these bars to a broker chart.
+        from nanobot.charts.controller import chart_candles
+        data = MarketCache.page(CandleSeries(id=chart.id, candles=chart_candles(chart)), count, before)
+        return {"candles": [c.model_dump(mode="json") for c in data], "data_revision": chart.data_revision,
+                "chart_id": chart.id, "timeframe": chart.timeframe, "before": before, "stale": True, "archived": True}
+    market = BrokerMarket(TradingAccounts(config.tools.integrations).client(chart.account_id))
+    cache = MarketCache(provider=chart.provider, account_id=chart.account_id)
     stale = False
     try:
-        data = await OandaClient(config.tools.integrations.oanda).candles(
+        data = await market.candles(
             chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=count, before=before)
     except ProviderUnavailableError:
         stale = True
@@ -101,13 +111,6 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
         raise PermissionError("Cloud charts are disabled")
     # Validate once before binding an authenticated user interaction.
     parsed = ChartRequest.model_validate(payload)
-    if parsed.operation == "create":
-        connection = config.tools.integrations.oanda
-        if connection is None:
-            raise ValueError("OANDA connection is not configured")
-        names = {item.name for item in await OandaClient(connection).instruments()}
-        if parsed.provider_instrument not in names or parsed.canonical_instrument != parsed.provider_instrument:
-            raise ValueError("Select an advertised OANDA instrument")
     ctx = ToolContext(config=config.tools, workspace=str(sessions.workspace), bus=bus, sessions=sessions)
     registry = ToolRegistry()
     registry.register(ChartTool(ctx))

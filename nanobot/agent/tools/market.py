@@ -9,8 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
-from nanobot.market.broker import BrokerInstrument, BrokerMarket
-from nanobot.market.oanda import GRANULARITIES, OandaClient
+from nanobot.market.broker import BrokerMarket
 from nanobot.trading.accounts import TradingAccounts
 
 
@@ -59,7 +58,7 @@ class MarketTool(Tool):
     action_class = "read"
     _scopes = {"core", "subagent"}
 
-    def __init__(self, client: BrokerMarket | OandaClient, accounts: TradingAccounts | None = None):
+    def __init__(self, client: BrokerMarket, accounts: TradingAccounts | None = None):
         self.client = client
         self.accounts = accounts
 
@@ -101,7 +100,7 @@ class MarketTool(Tool):
         context = current_request_context()
         client = BrokerMarket(self.accounts.client(request.account_id,
             principal=context.session_key if context else None)) if self.accounts else self.client
-        source = "metaapi" if isinstance(client, BrokerMarket) else "oanda"
+        source = "metaapi"
         if request.operation == "recommendation":
             if request.recommendation is None:
                 raise ValueError("A structured recommendation object is required")
@@ -116,7 +115,7 @@ class MarketTool(Tool):
                     raise ValueError("Recommendation chart belongs to another market source/account")
                 data["session_key"] = chart.session_key
             return "```market_recommendation\n" + json.dumps(data) + "\n```"
-        timeframes = await client.timeframes() if isinstance(client, BrokerMarket) else GRANULARITIES
+        timeframes = await client.timeframes()
         if request.operation == "capabilities":
             return json.dumps({"operations": ["instruments", "quote", "candles", "timeframes", "recommendation"],
                 "examples": [{"operation": "instruments"}],
@@ -135,11 +134,11 @@ class MarketTool(Tool):
             # Match advertised aliases only, never infer broker symbols or execution mappings.
             matches = [item for item in instruments if query.upper() in {
                 item.name.upper(), item.display_name.upper(),
-                item.canonical_instrument.upper() if isinstance(item, BrokerInstrument) else item.name.replace("_", "").upper()}]
+                item.canonical_instrument.upper()}]
             if len(matches) != 1:
                 raise ValueError("Instrument unavailable or ambiguous; use instruments to select its exact name")
             symbol = matches[0].name
-            canonical = matches[0].canonical_instrument if isinstance(matches[0], BrokerInstrument) else symbol
+            canonical = matches[0].canonical_instrument
         assert symbol is not None and canonical is not None
         timeframe = {"D1": "D", "W1": "W", "MN1": "M"}.get(request.timeframe.upper(), request.timeframe.upper())
         if request.operation == "candles" and timeframe not in timeframes:

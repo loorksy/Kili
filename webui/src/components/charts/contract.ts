@@ -17,6 +17,8 @@ export interface CloudChartState {
   revision: number;
   canonical_instrument: string;
   provider_instrument: string;
+  provider?: "metaapi" | "oanda";
+  account_id?: string | null;
   timeframe: string;
   session_key: string;
   annotations: ChartAnnotation[];

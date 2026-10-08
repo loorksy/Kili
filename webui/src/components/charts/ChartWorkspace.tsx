@@ -106,7 +106,10 @@ function ChartPanel({ reference }: { reference: ChartReference | null }) {
     if (!sessionKey || !symbol) return;
     setBusy(true);
     try {
-      const chart = await updateCloudChart(client, sessionKey, { operation: "create", provider_instrument: symbol, canonical_instrument: symbol, timeframe: "H1" });
+      const instrument = catalog?.instruments.find(item => item.name === symbol);
+      if (!instrument) throw new Error("Select an advertised broker instrument");
+      const chart = await updateCloudChart(client, sessionKey, { operation: "create", provider_instrument: symbol,
+        canonical_instrument: instrument.canonical_instrument ?? symbol, account_id: instrument.account_id, timeframe: "H1" });
       workspace?.show({ chart_id: chart.id, session_key: sessionKey });
       setCatalog(previous => previous ? { ...previous, charts: [...previous.charts, {
         chart_id: chart.id, session_key: sessionKey, instrument: chart.canonical_instrument, timeframe: chart.timeframe,
@@ -120,7 +123,7 @@ function ChartPanel({ reference }: { reference: ChartReference | null }) {
       <ChartCandlestick className="h-4 w-4" /><span className="text-sm font-medium">{ar ? "الشارت" : "Chart"}</span>
       {!!catalog?.charts.length && <select aria-label={ar ? "اختيار الشارت" : "Select chart"} className="min-w-0 bg-background text-xs" value={selected?.chart_id ?? ""}
         onChange={event => { const chart = catalog.charts.find(item => item.chart_id === event.target.value); if (chart) workspace.show(chart); }}>
-        {catalog.charts.map(chart => <option key={chart.chart_id} value={chart.chart_id}>{chart.instrument} · {chart.timeframe}</option>)}
+        {catalog.charts.map(chart => <option key={chart.chart_id} value={chart.chart_id}>{chart.provider_instrument ?? chart.instrument} · {chart.timeframe}</option>)}
         {reference && !catalog.charts.some(chart => chart.chart_id === reference.chart_id) && <option value={reference.chart_id}>{ar ? "الشارت الحالي" : "Current chart"}</option>}
       </select>}
       <Button variant="ghost" size="sm" className="ms-auto gap-1" onClick={workspace.toggle} aria-label={ar ? "طي الشارت" : "Collapse chart"}><ChevronDown className="h-4 w-4" />{ar ? "طي" : "Collapse"}</Button>

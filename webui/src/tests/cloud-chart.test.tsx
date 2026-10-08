@@ -24,9 +24,22 @@ describe("Persistent Cloud Chart", () => {
     first.unmount();
     expect(mocks.destroy).toHaveBeenCalledTimes(1);
     render(<CloudChart reference={reference} />);
-    await screen.findByText("gold-usd");
+    await screen.findByText("XAU_USD");
     expect(mocks.read).toHaveBeenLastCalledWith("client-token", chartId, "websocket:main");
     expect(mocks.mount.mock.calls.at(-1)?.[1].revision).toBe(4);
+  });
+  it("labels legacy charts as read-only archives and never subscribes them to broker prices", async () => {
+    mocks.read.mockResolvedValue({ ...saved, provider: "oanda", account_id: null });
+    mocks.mount.mockImplementation((_container, _chart, feed: Datafeed) => {
+      feed.subscribe({ ticker: "XAU_USD" }, { multiplier: 1, timespan: "hour", text: "H1" }, vi.fn());
+      return mocks.destroy;
+    });
+    const view = render(<CloudChart reference={reference} />);
+    expect(await screen.findByText("Archived OANDA")).toBeInTheDocument();
+    expect(screen.getByLabelText("Chart timeframe")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save view" })).toBeDisabled();
+    expect(mocks.subscribe).not.toHaveBeenCalled();
+    view.unmount();
   });
   it("rejects executable or invalid chart references", () => {
     expect(parseChartReference('{"chart_id":"javascript:alert(1)","session_key":"websocket:main"}')).toBeNull();

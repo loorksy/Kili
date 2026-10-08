@@ -1,6 +1,7 @@
 """Broker-native market evidence for every exact symbol advertised by an account."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -41,6 +42,19 @@ class _BrokerCandle(BaseModel):
         if value.tzinfo is None:
             raise ValueError("Broker candle timestamps require UTC offsets")
         return value.astimezone(timezone.utc)
+
+
+class _BrokerPrice(BaseModel):
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+    symbol: str
+    time: datetime
+    bid: Decimal = Field(gt=0)
+    ask: Decimal = Field(gt=0)
+
+    @field_validator("time")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        return _BrokerCandle.aware(value)
 
 
 class BrokerMarket:
@@ -88,6 +102,21 @@ class BrokerMarket:
         return Quote(canonical_instrument=canonical, provider_instrument=symbol, account_id=self.connection.account_id,
                      time=datetime.fromisoformat(price.time.replace("Z", "+00:00")), bid=price.bid, ask=price.ask,
                      source="metaapi", fetched_at=datetime.now(timezone.utc))
+
+    async def stream_prices(self, symbols: dict[str, str]) -> AsyncIterator[Quote]:
+        for symbol, canonical in symbols.items():
+            await self.verify(symbol, canonical)
+        bridge = account_bridge(self.connection, self.client.secrets)
+        async for raw in bridge.stream_quotes(set(symbols)):
+            try:
+                price = _BrokerPrice.model_validate(raw)
+            except ValueError:
+                raise ProviderUnavailableError("Broker stream returned invalid pricing") from None
+            if price.symbol not in symbols or price.bid > price.ask:
+                raise ProviderUnavailableError("Broker stream returned inconsistent pricing")
+            yield Quote(canonical_instrument=symbols[price.symbol], provider_instrument=price.symbol,
+                account_id=self.connection.account_id, time=price.time, bid=price.bid, ask=price.ask,
+                source="metaapi", fetched_at=datetime.now(timezone.utc))
 
     async def candles(self, symbol: str, canonical: str, timeframe: str, *, count: int = 500,
                       before: str | None = None) -> list[Candle]:

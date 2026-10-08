@@ -11,12 +11,17 @@ from nanobot.config.schema import ToolsConfig
 
 
 async def test_scripted_analyst_uses_existing_registry_and_chart_not_browser(workstation, tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.market.models import Connection
     charts, controller, actor, chart, data = workstation
     monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     controller.cache.put("XAU_USD", "gold", "D", data)
     controller.cache.put("XAU_USD", "gold", "H4", data)
     bus = MessageBus()
     context = ToolContext(config=ToolsConfig(), workspace=str(tmp_path), bus=bus)
+    context.config.integrations.metaapi = Connection(secret_ref="test", account_id="practice")
+    monkeypatch.setattr("nanobot.market.broker.BrokerMarket.timeframes", AsyncMock(return_value=("D", "H4", "H1")))
     chart_tool, snapshot = ChartTool(context), ChartSnapshotTool(context)
     chart_tool.service = snapshot.service = charts
     registry = ToolRegistry()

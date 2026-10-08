@@ -1,4 +1,6 @@
-"""Controlled OANDA reads. Credentials exist only in the trusted HTTP request."""
+"""Retired OANDA adapter retained ONLY for offline historical fixture regression.
+Not shipped with Nanobot, not selectable by settings or any runtime tool.
+"""
 from __future__ import annotations
 
 import asyncio

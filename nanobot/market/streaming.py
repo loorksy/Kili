@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
-from nanobot.market.models import Quote
-from nanobot.market.oanda import OandaClient, ProviderUnavailableError
+from nanobot.market.models import Connection, Quote
+from nanobot.market.provider import ProviderUnavailableError
+
+
+class StreamingMarket(Protocol):
+    connection: Connection
+    def validate_symbol(self, symbol: str) -> str: ...
+    def stream_prices(self, symbols: dict[str, str]) -> AsyncIterator[Quote]: ...
 
 StreamStatus = Literal["connecting", "live", "reconnecting", "stopped"]
 StreamUpdate = Quote | StreamStatus
@@ -26,7 +32,7 @@ class _Consumer:
 class PriceStream:
     """Share one account stream and coalesce slow consumers to their newest tick."""
 
-    def __init__(self, client: OandaClient):
+    def __init__(self, client: StreamingMarket):
         self.client = client
         self._consumers: dict[str, _Consumer] = {}
         self._task: asyncio.Task[None] | None = None

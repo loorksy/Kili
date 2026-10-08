@@ -6,18 +6,19 @@ from pydantic import ValidationError
 
 from nanobot.agent.tools.market import MarketRecommendation, MarketTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.market.broker import BrokerInstrument, BrokerMarket
 from nanobot.market.models import Connection, Quote
-from nanobot.market.oanda import OandaClient, OandaInstrument
+from nanobot.trading.metaapi import MetaApiClient
 
 
 @pytest.fixture
 def market():
-    client = OandaClient(Connection(secret_ref="test", account_id="test"))
-    instrument = OandaInstrument(name="XAU_USD", type="METAL", displayName="XAU/USD", pipLocation=-2,
-        displayPrecision=3, tradeUnitsPrecision=0, minimumTradeSize="1")
+    client = BrokerMarket(MetaApiClient(Connection(secret_ref="test", account_id="test")))
+    instrument = BrokerInstrument(name="XAU_USD", display_name="XAU/USD", canonical_instrument="XAUUSD", account_id="test")
+    client.timeframes = AsyncMock(return_value=("H1", "H4", "D"))
     client.instruments = AsyncMock(return_value=[instrument])
     client.quote = AsyncMock(return_value=Quote(canonical_instrument="XAU_USD", provider_instrument="XAU_USD",
-        time="2026-10-08T12:00:00Z", fetched_at="2026-10-08T12:00:01Z", bid="2700.10", ask="2700.20", source="oanda"))
+        time="2026-10-08T12:00:00Z", fetched_at="2026-10-08T12:00:01Z", bid="2700.10", ask="2700.20", source="metaapi", account_id="test"))
     client.candles = AsyncMock(return_value=[])
     return MarketTool(client)
 
@@ -32,12 +33,12 @@ async def test_discovery_and_one_symbol_quote_use_registry(market):
         result = await registry.execute("market", {"operation": "quote", "instrument": symbol})
         assert not getattr(result, "is_error", False), result
         assert json.loads(str(result))["bid"] == "2700.10"
-    market.client.quote.assert_awaited_with("XAU_USD", "XAU_USD")
+    market.client.quote.assert_awaited_with("XAU_USD", "XAUUSD")
 
 
 async def test_daily_alias_and_exact_pair_remain_supported(market):
     await market.execute(operation="candles", instrument="XAUUSD", timeframe="D1", count=20)
-    market.client.candles.assert_awaited_with("XAU_USD", "XAU_USD", "D", count=20, before=None)
+    market.client.candles.assert_awaited_with("XAU_USD", "XAUUSD", "D", count=20, before=None)
     await market.execute(operation="quote", provider_instrument="XAU_USD", canonical_instrument="gold")
     market.client.quote.assert_awaited_with("XAU_USD", "gold")
 

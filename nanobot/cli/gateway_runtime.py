@@ -876,20 +876,22 @@ def _run_gateway(
                 deadlines.append(time.time_ns() // 1_000_000)
         return min(deadlines) if deadlines else None
 
-    if config.tools.integrations.oanda:
+    if config.tools.integrations.broker_accounts():
         import hashlib
 
-        from nanobot.market.oanda import OandaClient
+        from nanobot.market.broker import BrokerMarket
         from nanobot.market.watchers import MarketWatcher, MarketWatchers
         from nanobot.session.records import RecordStore
+        from nanobot.trading.accounts import TradingAccounts
 
         namespace = hashlib.sha256(str(session_manager.workspace).encode()).hexdigest()
-        market_watchers = MarketWatchers(
-            OandaClient(config.tools.integrations.oanda), session_manager.responsibilities,
-            RecordStore("market_watchers:" + namespace, MarketWatcher),
-        )
-        cron.register_deadline_source("market_conditions", market_watchers.nearest,
-                                      market_watchers.run_due)
+        for account_id in config.tools.integrations.broker_accounts():
+            market_watchers = MarketWatchers(
+                BrokerMarket(TradingAccounts(config.tools.integrations).client(account_id)), session_manager.responsibilities,
+                RecordStore("market_watchers:" + namespace, MarketWatcher),
+            )
+            cron.register_deadline_source("market_conditions:" + account_id, market_watchers.nearest,
+                                          market_watchers.run_due)
 
     cron.register_deadline_source("responsibilities", _nearest_responsibility_deadline,
                                   _run_due_responsibilities)
@@ -913,7 +915,7 @@ def _run_gateway(
         from nanobot.trading.recovery import TradeRecovery
         trade_executor = TradeExecutor(
             TradeProposals(MetaApiClient(connection)),
-            live_enabled=config.tools.integrations.autonomous_trading_enabled,
+            live_enabled=not config.tools.integrations.delegated_trading_blocked,
         )
         trade_recovery = TradeRecovery(
             trade_executor,

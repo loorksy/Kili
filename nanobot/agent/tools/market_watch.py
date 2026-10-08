@@ -19,6 +19,7 @@ class _WatchRequest(BaseModel):
     operation: Literal["create", "list", "cancel"]
     responsibility_id: str
     watcher_id: str | None = None
+    account_id: str | None = None
     provider_instrument: str | None = None
     canonical_instrument: str | None = None
     condition: Literal["above", "below", "cross_above", "cross_below", "new_completed_candle"] = "above"
@@ -29,6 +30,8 @@ class _WatchRequest(BaseModel):
 
 class MarketWatchTool(Tool):
     def __init__(self, ctx: ToolContext):
+        from nanobot.trading.accounts import TradingAccounts
+        self.accounts = TradingAccounts(ctx.config.integrations)
         namespace = hashlib.sha256(ctx.workspace.encode()).hexdigest()
         self.records = RecordStore("market_watchers:" + namespace, MarketWatcher)
         self.cron = ctx.cron_service
@@ -47,7 +50,7 @@ class MarketWatchTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.integrations.oanda is not None and ctx.sessions is not None
+        return bool(ctx.config.integrations.broker_accounts()) and ctx.sessions is not None
 
     @classmethod
     def create(cls, ctx: ToolContext) -> MarketWatchTool:
@@ -67,7 +70,13 @@ class MarketWatchTool(Tool):
         if request.operation == "create":
             if not request.provider_instrument or not request.canonical_instrument or (request.threshold is None and request.condition != "new_completed_candle"):
                 raise ValueError("Condition requires explicit instruments and threshold")
+            from nanobot.market.broker import BrokerMarket
+            market = BrokerMarket(self.accounts.client(request.account_id, principal=context.session_key if context else None))
+            await market.verify(request.provider_instrument, request.canonical_instrument)
+            if request.timeframe not in await market.timeframes():
+                raise ValueError("Timeframe is not supported by this broker account")
             watcher = MarketWatcher.model_validate({
+                "provider": "metaapi", "account_id": market.connection.account_id,
                 "id": "watch_" + uuid.uuid4().hex, "responsibility_id": request.responsibility_id,
                 "provider_instrument": request.provider_instrument,
                 "canonical_instrument": request.canonical_instrument,

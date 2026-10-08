@@ -30,6 +30,16 @@ synchronization wait is followed by another execution/effect ownership check
 before outbound financial mutation; tests cover losing ownership during that
 wait.
 
-This is the data/binding foundation. Legacy chart loading, streaming and
-settings paths still need the subsequent migration changes before the full
-OANDA retirement can be deployed.
+Production tools, chart feeds, account watchers and Settings now use broker
+connections only. A synchronized SDK streaming connection is shared per account
+while consumers need quotes; consumer queues are bounded and newest-per-symbol
+coalesced. Historical candles run independently, so their refresh never blocks
+bid/ask. Chart candle refresh is bounded to once per minute plus rollover, not
+claimed to be tick-level OHLC. Provider/network latency remains explicit.
+
+Legacy OANDA chart records can be reopened from their original cached evidence
+as stale, read-only archives. They cannot be edited/rebound or subscribe to
+broker data. Legacy active watchers become `needs_account_binding`, without
+cancelling the owning responsibility. Create an explicitly account-bound broker
+chart/watcher to continue. The retired OANDA adapter exists only under tests
+for offline regression fixtures, not in the installed runtime.

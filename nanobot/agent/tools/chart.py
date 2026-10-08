@@ -51,6 +51,7 @@ class ChartRequest(BaseModel):
     locked: bool | None = None
     agent_editable: bool | None = None
     chart_id: str | None = None
+    account_id: str | None = None
     expected_revision: int | None = None
     canonical_instrument: str | None = None
     provider_instrument: str | None = None
@@ -137,21 +138,33 @@ class ChartTool(Tool):
         if request.operation == "create":
             if not request.canonical_instrument or not request.provider_instrument or not request.timeframe:
                 raise ValueError("Chart requires explicit instruments and timeframe")
+            from nanobot.market.broker import BrokerMarket
+            from nanobot.trading.accounts import TradingAccounts
+            market = BrokerMarket(TradingAccounts(self.ctx.config.integrations).client(request.account_id, principal=actor.principal))
+            await market.verify(request.provider_instrument, request.canonical_instrument)
+            if request.timeframe not in await market.timeframes():
+                raise ValueError("Timeframe is not supported by this broker account")
             chart = self.service.create(actor, request.canonical_instrument, request.provider_instrument,
-                                         request.timeframe, request.owner_scope)
+                                         request.timeframe, request.owner_scope, account_id=market.connection.account_id)
         else:
             if not request.chart_id:
                 raise ValueError("Chart id is required")
             chart = self.service.get(request.chart_id, actor)
+            if request.account_id and request.account_id != chart.account_id:
+                raise PermissionError("Chart remains bound to its original broker account")
+            if chart.provider != "metaapi" or chart.account_id is None:
+                if request.operation != "get":
+                    raise ValueError("Legacy chart is archived: create a broker chart with an explicit symbol; old evidence is not relabelled")
+            from nanobot.market.broker import BrokerMarket
+            from nanobot.trading.accounts import TradingAccounts
             if request.operation == "load_history":
-                from nanobot.market.oanda import OandaClient
-                connection = self.ctx.config.integrations.oanda
-                if connection is None:
-                    raise ValueError("OANDA connection is not configured")
+                market = BrokerMarket(TradingAccounts(self.ctx.config.integrations).client(chart.account_id))
                 self.service.require_access(chart, actor, write=True)
                 if request.expected_revision is None:
                     raise ValueError("Expected revision is required to select a historical window")
-                candles = await OandaClient(connection).candles(chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=request.history_count, before=request.history_before)
+                candles = await market.candles(chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=request.history_count, before=request.history_before)
+                if not candles:
+                    raise ValueError("Broker returned no history in this range")
                 from nanobot.charts.history import ChartHistory
                 window = ChartHistory().put(chart, candles)
                 chart.history_window_id = window.id
@@ -216,13 +229,16 @@ class ChartTool(Tool):
             elif request.operation == "set_timeframe":
                 if not request.timeframe:
                     raise ValueError("Timeframe is required")
+                market = BrokerMarket(TradingAccounts(self.ctx.config.integrations).client(chart.account_id))
+                if request.timeframe not in await market.timeframes():
+                    raise ValueError("Timeframe is not supported by this broker account")
                 chart.timeframe = request.timeframe
                 chart.history_window_id = None
             elif request.operation == "set_instrument":
                 if not request.canonical_instrument or not request.provider_instrument:
                     raise ValueError("Explicit instruments are required")
-                from nanobot.market.oanda import OandaClient
-                OandaClient.validate_symbol(request.provider_instrument)
+                market = BrokerMarket(TradingAccounts(self.ctx.config.integrations).client(chart.account_id))
+                await market.verify(request.provider_instrument, request.canonical_instrument)
                 chart.canonical_instrument, chart.provider_instrument = request.canonical_instrument, request.provider_instrument
                 chart.data_revision = ""
                 chart.history_window_id = None

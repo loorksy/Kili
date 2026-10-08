@@ -9,8 +9,13 @@ from nanobot.config.schema import ToolsConfig
 
 
 async def test_temporary_analysis_explicit_publication_and_object_cas(workstation, tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from nanobot.market.models import Connection
     service, _, actor, chart, _ = workstation
     tool = ChartTool(ToolContext(config=ToolsConfig(), workspace=str(tmp_path)))
+    tool.ctx.config.integrations.metaapi = Connection(secret_ref="test", account_id="practice")
+    monkeypatch.setattr("nanobot.market.broker.BrokerMarket.timeframes", AsyncMock(return_value=("H1", "H4")))
     tool.service = service
     with request_context(RequestContext(channel="websocket", chat_id="main", session_key=actor.principal)):
         await tool.execute(operation="add_annotation", chart_id=chart.id, expected_revision=0,

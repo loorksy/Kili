@@ -2,9 +2,9 @@ from decimal import Decimal
 
 import httpx
 import pytest
+from legacy_oanda import OandaClient, ProviderUnavailableError
 
 from nanobot.market.models import Connection
-from nanobot.market.oanda import OandaClient, ProviderUnavailableError
 from nanobot.security.secrets import SecretStore
 
 

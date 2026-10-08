@@ -96,3 +96,18 @@ async def test_malformed_provider_evidence_is_rejected(monkeypatch, bad):
     monkeypatch.setattr("nanobot.market.broker.account_bridge", lambda *_: SimpleNamespace(request=request))
     with pytest.raises(ProviderUnavailableError):
         await market.candles("US500+", market.canonical("US500+"), "H1", count=1)
+
+
+async def test_broker_prices_keep_decimal_account_identity_and_reject_malformed_frames(monkeypatch):
+    market = BrokerMarket(broker())
+    async def prices(symbols):
+        assert symbols == {"US500+"}
+        yield {"symbol": "US500+", "time": "2026-10-08T10:00:00Z", "bid": "5000.12345", "ask": "5000.22345"}
+        yield {"symbol": "US500+", "time": "2026-10-08T10:00:01Z", "bid": "NaN", "ask": "5000"}
+    monkeypatch.setattr("nanobot.market.broker.account_bridge", lambda *_: SimpleNamespace(stream_quotes=prices))
+    stream = market.stream_prices({"US500+": market.canonical("US500+")})
+    quote = await anext(stream)
+    assert quote.bid == Decimal("5000.12345") and quote.account_id == "first"
+    assert quote.source == "metaapi" and quote.time.tzinfo is not None
+    with pytest.raises(ProviderUnavailableError, match="invalid pricing"):
+        await anext(stream)

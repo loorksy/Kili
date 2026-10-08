@@ -7,8 +7,8 @@ from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
+from nanobot.market.broker import BrokerMarket
 from nanobot.market.models import Candle, Connection, Quote
-from nanobot.market.oanda import OandaClient
 from nanobot.session.manager import SessionManager
 from nanobot.webui.chart_stream import ChartStreams, candle_end
 from nanobot.webui.gateway_services import build_gateway_services
@@ -24,7 +24,7 @@ def gateway(tmp_path, actor):
 
     def configure(config):
         config.tools.integrations.charts_enabled = True
-        config.tools.integrations.oanda = Connection(secret_ref="fixture", account_id="practice")
+        config.tools.integrations.metaapi = Connection(secret_ref="fixture", account_id="practice")
 
     services.settings.config.update(configure)
     return services
@@ -51,8 +51,8 @@ async def test_live_quote_is_immediate_despite_slow_rest_and_scope_rechecked(wor
     async def send(connection, event, **fields):
         await events.put(fields)
 
-    monkeypatch.setattr(OandaClient, "stream_prices", prices)
-    monkeypatch.setattr(OandaClient, "candles", candles)
+    monkeypatch.setattr(BrokerMarket, "stream_prices", prices)
+    monkeypatch.setattr(BrokerMarket, "candles", candles)
     streams = ChartStreams(services, send)
     connection = AsyncMock(spec=ServerConnection)
     payload = {"chart_id": chart.id, "session_key": actor.principal, "subscription_id": "open-chart"}
@@ -60,7 +60,7 @@ async def test_live_quote_is_immediate_despite_slow_rest_and_scope_rechecked(wor
         await streams.change(connection, payload, subscribe=True)
         now = data[-1].time + timedelta(minutes=1)
         quote = Quote(canonical_instrument="gold", provider_instrument="XAU_USD", time=now,
-            fetched_at=now, bid="200", ask="202", source="oanda")
+            fetched_at=now, bid="200", ask="202", source="metaapi", account_id="practice")
         await incoming.put(quote)
         while True:
             first = await asyncio.wait_for(events.get(), 1)
@@ -74,8 +74,8 @@ async def test_live_quote_is_immediate_despite_slow_rest_and_scope_rechecked(wor
         later = quote.model_copy(update={"time": now + timedelta(seconds=1)})
         await incoming.put(later)
         second = await asyncio.wait_for(events.get(), 1)
-        assert second["candle"]["close"] == "201" and second["provisional"]
-        assert not second["candle"]["complete"] and second["candle"]["volume"] is None
+        assert second["candle"]["close"] == str(data[-1].close) and second["provisional"]
+        assert not second["candle"]["complete"]  # Never fabricate midpoint OHLC.
         assert chart.revision == charts.get(chart.id, actor).revision
         changed = charts.get(chart.id, actor)
         changed.timeframe = "H4"
@@ -84,7 +84,7 @@ async def test_live_quote_is_immediate_despite_slow_rest_and_scope_rechecked(wor
         assert (await asyncio.wait_for(events.get(), 1))["status"] == "stopped"
         await asyncio.gather(*streams._retire_tasks)
         assert connection not in streams._feeds
-        assert streams._stream._task is None
+        assert streams._streams["practice"]._task is None
     finally:
         await streams.close()
 
@@ -101,7 +101,7 @@ async def test_chart_scope_and_existing_conversation_required(workstation, tmp_p
     services.session_manager.save(services.session_manager.get_or_create("websocket:other"))
     with pytest.raises(PermissionError):
         await streams.change(connection, payload, subscribe=True)
-    assert streams._stream is None
+    assert streams._streams == {}
     await streams.close()
 
 
@@ -124,10 +124,10 @@ async def test_subscription_requires_authenticated_webui_socket_not_generic_clie
     await channel._commands.close()
 
 
-@pytest.mark.parametrize("timeframe, expected", [("M1", 60), ("H4", 14400), ("D", 82800), ("W", 601200)])
-def test_candle_boundaries_use_oanda_timeframe_and_ny_dst(timeframe, expected):
+@pytest.mark.parametrize("timeframe, expected", [("M1", 60), ("H4", 14400), ("D", 86400), ("W", 604800)])
+def test_candle_boundaries_do_not_apply_oanda_new_york_alignment(timeframe, expected):
     # Saturday before the New York spring transition at 17:00 local.
     start = datetime(2026, 3, 7, 22, tzinfo=timezone.utc)
     candle = Candle(canonical_instrument="gold", provider_instrument="XAU_USD", time=start,
-        open=1, high=1, low=1, close=1, complete=False, fetched_at=start, source="oanda")
+        open=1, high=1, low=1, close=1, complete=False, fetched_at=start, source="metaapi", account_id="practice")
     assert (candle_end(candle, timeframe) - start).total_seconds() == expected

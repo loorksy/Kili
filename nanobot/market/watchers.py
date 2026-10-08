@@ -8,13 +8,17 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from nanobot.market.broker import BrokerMarket
 from nanobot.market.models import Quote
-from nanobot.market.oanda import GRANULARITIES, OandaClient, ProviderUnavailableError
+from nanobot.market.provider import TIMEFRAMES, ProviderUnavailableError
 from nanobot.session.records import RecordStore, RuntimeRecord
 from nanobot.session.responsibilities import ResponsibilityStore
+from nanobot.trading.metaapi import MetaApiClient
 
 
 class MarketWatcher(RuntimeRecord):
+    provider: Literal["oanda", "metaapi"] = "oanda"  # Archived legacy evidence only.
+    account_id: str | None = None
     responsibility_id: str
     provider_instrument: str
     canonical_instrument: str
@@ -29,31 +33,40 @@ class MarketWatcher(RuntimeRecord):
     fired: bool = False
     observation: Quote | None = None
     failures: int = 0
+    needs_account_binding: bool = False
 
     @model_validator(mode="after")
     def check_condition(self) -> MarketWatcher:
-        OandaClient.validate_symbol(self.provider_instrument)
+        MetaApiClient.validate_symbol(self.provider_instrument)
         if self.condition != "new_completed_candle" and self.threshold is None:
             raise ValueError("Price conditions require a threshold")
-        if self.timeframe not in GRANULARITIES:
+        if self.timeframe not in TIMEFRAMES:
             raise ValueError("Unsupported watcher timeframe")
         return self
 
 
 class MarketWatchers:
-    def __init__(self, client: OandaClient, responsibilities: ResponsibilityStore,
+    def __init__(self, client: BrokerMarket, responsibilities: ResponsibilityStore,
                  records: RecordStore[MarketWatcher] | None = None):
         self.client, self.responsibilities = client, responsibilities
         self.records = records or RecordStore("market_watchers", MarketWatcher)
 
     def nearest(self) -> int | None:
-        due = [w.next_check_ms for w in self.records.list() if w.active]
+        due = [w.next_check_ms for w in self.records.list() if w.active
+               and (w.provider != "metaapi" or w.account_id is None or w.account_id == self.client.connection.account_id)]
         return min(due) if due else None
 
     async def run_due(self, now_ms: int | None = None) -> None:
         now = now_ms if now_ms is not None else time.time_ns() // 1_000_000
         quotes: dict[str, Quote] = {}
         for watcher in self.records.list():
+            if watcher.provider != "metaapi" or watcher.account_id is None:
+                if watcher.active:
+                    watcher.active, watcher.needs_account_binding = False, True
+                    self.records.save(watcher)
+                continue
+            if watcher.account_id != self.client.connection.account_id:
+                continue
             if not watcher.active or watcher.next_check_ms > now:
                 continue
             responsibility = self.responsibilities.get(watcher.responsibility_id)
@@ -99,6 +112,6 @@ class MarketWatchers:
             if hit:
                 # Persist the wake FIRST. A crash before watcher save repeats the same key.
                 self.responsibilities.enqueue(watcher.responsibility_id, f"market:{watcher.id}",
-                                               f"Market condition {watcher.condition} {watcher.threshold} satisfied on {watcher.provider_instrument}; observed {price}, source OANDA at {quote.time.isoformat()}.")
+                                               f"Market condition {watcher.condition} {watcher.threshold} satisfied on {watcher.provider_instrument}; observed {price}, broker account {watcher.account_id} at {quote.time.isoformat()}.")
                 watcher.active, watcher.fired = False, True
             self.records.save(watcher)
