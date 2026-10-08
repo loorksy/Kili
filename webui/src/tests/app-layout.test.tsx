@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Window as HappyWindow } from "happy-dom";
 
 import i18n from "@/i18n";
@@ -295,6 +295,11 @@ import App from "@/App";
 import { mockBrowserFocus } from "./browser-focus";
 
 describe("App layout", () => {
+  beforeAll(async () => {
+    // Task controls test capability admission, not cold Vite compilation of
+    // the lazy conversation bundle. Load it before the existing UI wait clocks.
+    await import("@/components/thread/ThreadShell");
+  });
   let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
     await i18n.changeLanguage("en");
