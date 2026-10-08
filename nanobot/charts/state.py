@@ -5,8 +5,18 @@ import uuid
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
+from nanobot.charts.capabilities import DRAWING_ANCHORS
+from nanobot.charts.indicators import IndicatorInstance
 from nanobot.market.oanda import GRANULARITIES
 from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore, RuntimeRecord
@@ -14,15 +24,26 @@ from nanobot.session.records import RecordStore, RuntimeRecord
 
 class ChartPoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    timestamp: int | None = None
+    timestamp: int | None = Field(default=None, ge=0, le=8640000000000000)
     value: Decimal
+
+    @field_validator("value")
+    @classmethod
+    def finite_price(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or abs(value) > Decimal("1e30"):
+            raise ValueError("Chart prices must be finite and bounded")
+        return value
 
 
 class Annotation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^annotation_[a-f0-9]{32}$")
-    type: Literal["horizontal_line", "trend_line", "price_zone", "marker", "note", "entry", "stop", "target"]
-    points: list[ChartPoint] = Field(min_length=1, max_length=2)
+    type: Literal["horizontal_line", "trend_line", "price_zone", "marker", "note", "entry", "stop", "target", "drawing"]
+    points: list[ChartPoint] = Field(min_length=1, max_length=9)
+    library_name: str | None = None
+    visible: bool = True
+    locked: bool = False
+    origin: Literal["USER", "NANOBOT", "SUBAGENT", "IMPORT"] = "NANOBOT"
     text: str = Field(default="", max_length=2000)
     created_by: str
     responsibility_id: str | None = None
@@ -34,6 +55,15 @@ class Annotation(BaseModel):
 
     @model_validator(mode="after")
     def geometry(self) -> Annotation:
+        if self.type == "drawing":
+            if self.library_name not in DRAWING_ANCHORS:
+                raise ValueError("Unavailable drawing tool")
+            if len(self.points) != DRAWING_ANCHORS[self.library_name]:
+                raise ValueError("Incorrect drawing anchor count")
+            if any(point.timestamp is None for point in self.points):
+                raise ValueError("Drawing anchors require explicit timestamps")
+        if any(not point.value.is_finite() or abs(point.value) > Decimal("1e30") for point in self.points):
+            raise ValueError("Drawing prices must be finite")
         if self.type in {"trend_line", "price_zone"} and len(self.points) != 2:
             raise ValueError("This annotation requires two points")
         if self.type == "trend_line" and any(point.timestamp is None for point in self.points):
@@ -42,6 +72,19 @@ class Annotation(BaseModel):
 
 
 class CloudChart(RuntimeRecord):
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_provenance(cls, value: object) -> object:
+        if isinstance(value, dict):
+            parsed = TypeAdapter(dict[str, object]).validate_python(value)
+            drawings = TypeAdapter(list[dict[str, object]]).validate_python(parsed.get("annotations", []))
+            for drawing in drawings:
+                # Older rows did not distinguish users from models: preserve them conservatively.
+                drawing.setdefault("origin", "IMPORT")
+            parsed["annotations"] = drawings
+            return parsed
+        return value
+
     owner_scope: Literal["MAIN", "SHARED", "WORKER", "RESPONSIBILITY"] = "MAIN"
     owner_reference: str
     session_key: str
@@ -56,6 +99,7 @@ class CloudChart(RuntimeRecord):
     right_spacing: int = Field(default=40, ge=0, le=500)
     visible_range: tuple[int, int] | None = None
     layout: dict[str, JsonValue] = Field(default_factory=dict)
+    indicator_instances: list[IndicatorInstance] = Field(default_factory=list, max_length=20)
     studies: list[str] = Field(default_factory=list, max_length=20)
     annotations: list[Annotation] = Field(default_factory=list, max_length=500)
     annotation_revision: int = 0
@@ -72,6 +116,7 @@ class CloudChart(RuntimeRecord):
 class ChartActor(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     principal: str
+    user_interaction: bool = False
     worker_id: str | None = None
     responsibility_id: str | None = None
     parent_principal: str | None = None
@@ -124,6 +169,11 @@ class ChartService:
     def update(self, chart: CloudChart, actor: ChartActor, expected_revision: int) -> CloudChart:
         current = self.records.get(chart.id)
         self.require_access(current, actor, write=True)
+        if not actor.user_interaction:
+            proposed = {a.id: a for a in chart.annotations}
+            for annotation in current.annotations:
+                if annotation.origin in {"USER", "IMPORT"} and proposed.get(annotation.id) != annotation:
+                    raise PermissionError("User drawings require an explicit user edit")
         for key in ("owner_scope", "owner_reference", "session_key", "linked_responsibility_id"):
             if getattr(current, key) != getattr(chart, key):
                 raise PermissionError("Chart ownership cannot change during an edit")

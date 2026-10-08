@@ -169,3 +169,6 @@ class CloudChartChanged(AgentEvent):
     chart_id: str
     revision: int
     annotation_revision: int
+    operation: str | None = None
+    anchors: tuple[tuple[int, str], ...] = ()
+    occurred_at: int = 0

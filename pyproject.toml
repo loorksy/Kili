@@ -23,6 +23,7 @@ license-files = [
 ]
 
 dependencies = [
+    "Pillow>=12.0,<13",
     "typer>=0.20.0,<1.0.0",
     "anthropic>=0.100.0,<1.0.0",
     "pydantic>=2.12.0,<3.0.0",
@@ -131,6 +132,8 @@ allow-direct-references = true
 [tool.hatch.build]
 include = [
     "nanobot/**/*.py",
+    "nanobot/charts/assets/*.cjs",
+    "nanobot/charts/assets/*.sha256",
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",

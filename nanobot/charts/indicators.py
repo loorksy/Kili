@@ -37,6 +37,8 @@ class Node(BaseModel):
     field: Literal["open", "high", "low", "close", "volume"] = "close"
     value: Decimal = Decimal(0)
     parameter: str | None = Field(default=None, max_length=80)
+    window_parameter: str | None = Field(default=None, max_length=80)
+    offset_parameter: str | None = Field(default=None, max_length=80)
     window: int = Field(default=14, ge=1, le=512)
     offset: int = Field(default=0, ge=0, le=512)
 
@@ -73,6 +75,9 @@ class IndicatorDefinition(BaseModel):
             arity = 1 if node.op in unary else 2 if node.op in binary else 3 if node.op == "choose" else 0
             if len(node.inputs) != arity or any(ref < 0 or ref >= index for ref in node.inputs):
                 raise ValueError("Nodes must be an acyclic, ordered graph with correct arity")
+            for reference in (node.window_parameter, node.offset_parameter):
+                if reference is not None and reference not in self.parameters:
+                    raise ValueError("Unknown window parameter")
             if node.op == "parameter" and node.parameter not in self.parameters:
                 raise ValueError("Unknown indicator parameter")
         if any(output.node >= len(self.nodes) for output in self.outputs):
@@ -86,9 +91,6 @@ def evaluate(definition: IndicatorDefinition, candles: list[Candle],
              parameters: dict[str, Decimal] | None = None) -> dict[str, list[Scalar]]:
     if len(candles) > 5000:
         raise ValueError("Indicator input exceeds 5000 candles")
-    work = len(candles) * sum(node.window + node.offset + 1 if node.op in {"mean", "min", "max", "std", "swing_high", "swing_low"} else 1 for node in definition.nodes)
-    if work > 2_000_000:
-        raise ValueError("Indicator calculation exceeds bounded work budget")
     supplied = parameters or {}
     if supplied.keys() - definition.parameters.keys():
         raise ValueError("Unknown indicator parameter")
@@ -97,10 +99,26 @@ def evaluate(definition: IndicatorDefinition, candles: list[Candle],
         bounds = definition.parameters[name]
         if not value.is_finite() or not bounds.minimum <= value <= bounds.maximum:
             raise ValueError("Indicator parameter outside validated bounds")
+    effective: list[Node] = []
+    for node in definition.nodes:
+        copy = node.model_copy(deep=True)
+        for field, reference in (("window", node.window_parameter), ("offset", node.offset_parameter)):
+            if reference is not None:
+                value = values[reference]
+                if value != int(value) or not (1 if field == "window" else 0) <= value <= 512:
+                    raise ValueError("Window parameters must be bounded integers")
+                if field == "window":
+                    copy.window = int(value)
+                else:
+                    copy.offset = int(value)
+        effective.append(copy)
+    work = len(candles) * sum(node.window + node.offset + 1 if node.op in {"mean", "min", "max", "std", "swing_high", "swing_low"} else 1 for node in effective)
+    if work > 2_000_000:
+        raise ValueError("Indicator calculation exceeds bounded work budget")
     series: list[list[Scalar]] = []
     with localcontext() as context:
         context.prec = 28
-        for node in definition.nodes:
+        for node in effective:
             result: list[Scalar] = []
             args = [series[ref] for ref in node.inputs]
             for i, candle in enumerate(candles):
@@ -179,6 +197,7 @@ class CustomIndicator(RuntimeRecord):
     family_id: str
     author: str
     source: Literal["CUSTOM", "USER_IMPORTED"] = "CUSTOM"
+    scope: Literal["PRIVATE", "SHARED"] = "PRIVATE"
     original_filename: str | None = Field(default=None, max_length=200)
     validation_status: Literal["VALIDATED"] = "VALIDATED"
     test_status: Literal["PASSED"] = "PASSED"
@@ -190,7 +209,8 @@ class IndicatorRegistry:
         self.records = records or RecordStore("custom_indicators", CustomIndicator)
 
     def register(self, definition: IndicatorDefinition, author: str, *, family_id: str | None = None,
-                 source: Literal["CUSTOM", "USER_IMPORTED"] = "CUSTOM", filename: str | None = None) -> CustomIndicator:
+                 source: Literal["CUSTOM", "USER_IMPORTED"] = "CUSTOM", filename: str | None = None,
+                 scope: Literal["PRIVATE", "SHARED"] = "PRIVATE") -> CustomIndicator:
         import uuid
         payload = definition.model_dump(mode="json")
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -202,7 +222,7 @@ class IndicatorRegistry:
         if family_id and not previous:
             raise PermissionError("Indicator family is outside this scope")
         for record in previous:
-            if record.definition_hash == digest:
+            if record.definition_hash == digest and record.scope == scope:
                 return record
         fixture = [Candle(canonical_instrument="fixture", provider_instrument="FIXTURE", time=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(hours=i), open=Decimal(i + 1), high=Decimal(i + 2), low=Decimal(i), close=Decimal(i + 1), complete=True, source="fixture", fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc)) for i in range(600)]
         for data in ([], fixture[:1], fixture[:10], fixture):
@@ -211,16 +231,16 @@ class IndicatorRegistry:
         version = max((r.indicator_version for r in previous), default=0) + 1
         return self.records.create(CustomIndicator(id=family + "_v" + str(version), family_id=family,
             indicator_version=version, definition=definition, definition_hash=digest, author=author,
-            source=source, original_filename=filename))
+            source=source, original_filename=filename, scope=scope))
 
     def get(self, indicator_id: str, author: str) -> CustomIndicator:
         record = self.records.get(indicator_id)
-        if record.author != author:
+        if record.author != author and record.scope != "SHARED":
             raise PermissionError("Private indicator belongs to another conversation")
         return record
 
     def search(self, author: str, query: str = "") -> list[CustomIndicator]:
-        return [r for r in self.records.list() if r.author == author and query.casefold() in (r.definition.name + " " + r.definition.description).casefold()]
+        return [r for r in self.records.list() if (r.author == author or r.scope == "SHARED") and query.casefold() in (r.definition.name + " " + r.definition.description).casefold()]
 
 
 class IndicatorInstance(BaseModel):
