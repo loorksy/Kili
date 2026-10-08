@@ -1121,6 +1121,8 @@ def _run_gateway(
                     tasks,
                     runtime_tasks,
                 )
+                from nanobot.trading.sdk_bridge import close_sdk_connections
+                await close_sdk_connections()
                 await bus.drain()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back

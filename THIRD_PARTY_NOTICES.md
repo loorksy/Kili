@@ -431,3 +431,21 @@ Chart PNG exports bundle the unmodified DejaVu Sans font. Bitstream Vera
 copyright (c) 2003 Bitstream, Inc.; DejaVu changes are public domain. The
 font redistribution license is included in
 `nanobot/charts/assets/DejaVuSans-LICENSE.txt`.
+
+## MetaApi Python SDK
+
+The operator-installed provider connector uses `metaapi-cloud-sdk==29.1.1`.
+It is not vendored into Nanobot. Its license states:
+
+> (c) Copyright 2020-2023 MetaApi DMCC. All rights reserved.
+> See https://metaapi.cloud/terms for the license.
+> The client library is provided as an open-source project to all
+> metaapi.cloud users or developers free of charge provided you use it in
+> order to implement applications which use metaapi.cloud API service.
+> Use in competing projects or products not using that service requires
+> written approval from the MetaApi project owners.
+
+Nanobot's adapter uses the MetaApi service. The SDK remains unmodified;
+the pinned HTTP/Socket.IO transport adapters are documented in
+`docs/metaapi-sdk-connector.md`. Dependency isolation preserves Nanobot's
+existing Socket.IO 5 channel support.

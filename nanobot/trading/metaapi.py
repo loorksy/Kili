@@ -1,4 +1,8 @@
-"""MetaApi REST adapter. Fixed operations, sanitized errors, no mutation retry."""
+"""Fixed MetaApi operations through the official dependency-isolated SDK.
+
+An explicitly injected HTTP transport remains a deterministic fixture seam;
+the gateway never falls back to manual REST when SDK connection fails.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +10,7 @@ import json
 import re
 from decimal import Decimal
 from typing import Literal
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
@@ -127,6 +131,8 @@ class MetaApiClient:
 
     async def _request(self, method: Literal["GET", "POST"], path: str, *, body: str | None = None,
                        provisioning: bool = False) -> object:
+        if self.transport is None:
+            return await self._sdk_request(method, path, body=body)
         token = self.secrets.resolve(self.connection.secret_ref)
         base = "https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai" if provisioning else self.base
         async with httpx.AsyncClient(transport=self.transport or PinnedDNSAsyncTransport(),
@@ -151,6 +157,30 @@ class MetaApiClient:
                         continue
                     raise ProviderUnavailableError("MetaApi operation unavailable; mutation outcome may be uncertain") from None
         raise ProviderUnavailableError("MetaApi operation unavailable")
+
+    async def _sdk_request(self, method: str, path: str, *, body: str | None) -> object:
+        from nanobot.trading.sdk_bridge import SDKRejectedError, account_bridge
+        suffix = path.removeprefix(self.account_path)
+        parameters: dict[str, JsonValue] = {}
+        reads = {"": "connection", "/account-information": "account", "/positions": "positions",
+                 "/orders": "orders", "/symbols": "symbols"}
+        if method == "GET" and suffix in reads:
+            operation = reads[suffix]
+        elif method == "GET" and (match := re.fullmatch(r"/symbols/([^/]+)/(specification|current-price)", suffix)):
+            operation = "specification" if match[2] == "specification" else "price"
+            parameters = {"symbol": unquote(match[1])}
+        elif method == "GET" and (match := re.fullmatch(r"/(history-orders|history-deals)/time/([^/]+)/([^/]+)", suffix)):
+            operation = "history_orders" if match[1] == "history-orders" else "history_deals"
+            parameters = {"start": unquote(match[2]), "end": unquote(match[3])}
+        elif method == "POST" and suffix == "/calculate-margin" and body:
+            operation = "margin"
+            parameters = TypeAdapter(dict[str, JsonValue]).validate_python(json.loads(body, parse_float=str))
+        else:
+            raise ValueError("Unsupported MetaApi SDK operation")
+        try:
+            return await account_bridge(self.connection, self.secrets).request(operation, parameters)
+        except SDKRejectedError:
+            raise ProviderRejectedError("MetaApi rejected the requested account operation") from None
 
     @property
     def account_path(self) -> str:
@@ -224,6 +254,24 @@ class MetaApiClient:
         if owned.mandate_id:
             from nanobot.trading.missions import validate_delegated_outbound
             validate_delegated_outbound(journal,owned)
+        if self.transport is None:
+            from nanobot.trading.sdk_bridge import SDKRejectedError, account_bridge
+            bridge = account_bridge(self.connection, self.secrets)
+            try:
+                # Account synchronization may wait. Fence again after it,
+                # immediately before handing the mutation to the SDK.
+                await bridge.request("prepare_trade")
+                latest = journal.get_effect(effect.id)
+                if (latest.token != effect.token or latest.generation != effect.generation
+                        or latest.state != "STARTED"):
+                    raise PermissionError("SDK effect ownership changed during synchronization")
+                journal.validate_effect_owner(latest)
+                if latest.mandate_id:
+                    from nanobot.trading.missions import validate_delegated_outbound
+                    validate_delegated_outbound(journal, latest)
+                return parse_provider(TradeResponse, await bridge.request("trade", payload))
+            except SDKRejectedError:
+                raise ProviderRejectedError("MetaApi rejected the exact authorized trade") from None
         # Numeric JSON is encoded from validated decimal strings without float conversion.
         numeric = {"volume", "openPrice", "stopLoss", "takeProfit"}
         fields: list[str] = []

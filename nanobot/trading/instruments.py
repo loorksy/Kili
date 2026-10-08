@@ -29,7 +29,10 @@ class InstrumentMappings:
         return "mapping_" + hashlib.sha256(f"{provider}\0{account}\0{instrument}".encode()).hexdigest()
 
     def require(self, account: str, instrument: str) -> SymbolMapping:
-        mapping = self.records.get(self.key("metaapi", account, instrument))
+        try:
+            mapping = self.records.get(self.key("metaapi", account, instrument))
+        except ValueError:
+            raise ValueError("Instrument mapping is missing for this account; verify the exact broker symbol") from None
         if mapping.status != "VERIFIED":
             raise ValueError("Instrument mapping is ambiguous or unverified; user resolution required")
         return mapping
