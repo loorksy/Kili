@@ -1,3 +1,6 @@
+> Historical report. Broker integration, chart exports and chat authorization
+> are superseded by [the broker upgrade](broker-upgrade-report.md).
+
 # Cloud Chart workstation implementation report
 
 This is the second implementation pass on the accepted Nanobot baseline

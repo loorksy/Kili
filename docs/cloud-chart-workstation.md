@@ -1,7 +1,7 @@
 # Agent-operated Cloud Chart workstation
 
 This extends the existing Cloud Chart, `chart` tool, authenticated WebSocket
-projection and KLineChart Pro adapter. There is one Nanobot runtime. No browser,
+projection and KLineChart Pro adapter. There is one Nanobot runtime. No general browser,
 computer, OS cursor, new navigation section or trading execution path was added.
 
 ## Semantic controller and history
@@ -19,7 +19,7 @@ it never silently returns a neighboring candle. Instrument changes clear the
 old viewport; timeframe changes retain semantic time bounds and invalidate the
 old historical-window reference. Reframe returns to recent live evidence.
 
-`load_history` fetches controlled OANDA history and selects that window through
+`load_history` fetches account-bound broker history and selects that window through
 chart revision checking. Protected per-chart history records prevent a historical
 view from being evicted by the live 5,000-candle market cache. Up to sixteen
 recent bounded windows, plus the linked active window, are retained. Client
@@ -39,20 +39,15 @@ with at most 100 instruments, 256 consumers and 16 charts per connection.
 Each slow consumer retains only its newest pending update. Retries back off
 from one to thirty seconds; missing heartbeats/read timeouts reconnect safely.
 
-`cloud_chart_price` delivers small timestamped Decimal quote payloads and
-provisional current-candle updates. REST history fetches/reconciliation happen
-independently and cannot delay the live quote. Each subscription restores its
-bounded recent candle window once, including reconnect after downtime; subsequent
-reconciliation sends at most two bars, not full history on every tick.
-Completed candles come from REST;
-live candles use observed midpoints with unavailable volume, not an invented
-tick count. Daily/weekly rollover respects OANDA's default New York alignment
-and DST. History/annotations and chart identity remain durable; ticks, cursors
-and subscriptions do not become a new persistence format. Saved historical
-viewports do not jump to the live candle. The UI shows bid/ask, source time,
-reconnection/closed-market status and stale quotes, and does not remount the
-chart for each price. This live chart feed does not alter durable watchers'
-configured cadence, broker execution, approvals or autonomous-trading settings.
+`cloud_chart_price` delivers small timestamped Decimal broker quotes and
+broker-provided candle updates. Each chart retains its original account; switching
+conversation accounts cannot switch this feed. SDK streams multiplex active
+symbols and coalesce slow consumers, preserving the latest price per symbol.
+Official history runs separately, at most once per minute and on rollover;
+quotes cannot be blocked by that read. No midpoint-derived OHLC or invented
+volume is used. Historical viewports do not jump to live candles. Reconnect,
+source-time and stale/closed-market status remain visible. Old OANDA charts
+are explicitly labeled read-only archives and do not subscribe to broker ticks.
 
 ## Drawings and concurrent edits
 
@@ -75,7 +70,7 @@ contextual **Agent edits** checkbox resolves through the authenticated user
 adapter; only that backend user context can grant/revoke the drawing's
 `agent_editable` permission. The model cannot grant itself this permission.
 The contextual **Save view** button reads the pinned core's actual visible-range
-and candle-list APIs, then fetches/persists that semantic OANDA window through
+and candle-list APIs, then fetches/persists that semantic broker window through
 the backend. Unsaved user pan/zoom remains transient. Human drawings and
 completed drag edits persist through the same chart tool boundary. Failed
 concurrent saves show a concise conflict message.
@@ -154,30 +149,25 @@ Call the existing `message` tool with that path in `media` to send it to the
 current conversation/channel. Export needs neither a vision-capable model nor
 an image-generation provider. `format="image"` remains internal vision input,
 not user attachment delivery. `format="structured"` remains the default.
-Snapshots use the selected cached OANDA scene and its freshness metadata, not
+Snapshots use the selected cached account-bound broker scene and its freshness metadata, not
 screenshots of the UI or unrelated private content. No trading mutation occurs.
 
-The bundled unmodified DejaVu Sans font includes Arabic glyphs. Pillow RAQM
-layout (included in normal Pillow wheels) provides Arabic shaping and bidi
-layout. Deployments building Pillow themselves need RAQM for connected RTL
-text. No host font installation or browser renderer is necessary; license
-notices and the font ship with the Python package.
+`chart_snapshot` defaults to structured data for models without vision.
+Image-capable models may request `format=image`; user delivery uses
+`format=attachment` followed by the existing message/media tool. Both export
+the same pinned KLineChart Pro/core and adapter used by the client. Native
+curves, channels and Fibonacci overlays are not approximate anchor sketches.
+Indicator series are calculated from the same backend scene, including warm-up
+history, rather than recalculated from a truncated viewport.
 
-`chart_snapshot` defaults to structured data, usable by models without vision.
-An image-capable model can explicitly request `format=image`, receiving a native
-PNG image block plus exact metadata. It uses the same protected candles,
-viewport, drawing definitions and indicator parameters as the client. Vision
-is optional and never automatically called after an action.
-
-Pillow renders only the chart scene, with bounded dimensions (320–1,600 by
-240–1,200). It reads no desktop/browser/settings/conversation page. No model
-code runs in the renderer. Candles, price/time axes, drawings and indicator
-panes are deterministic. Complex library curves/channels use labeled semantic
-anchor previews, also listed in scene warnings: this rasterizer is **not
-pixel-identical** to KLineChart Pro. Exact values always come from structured
-inspection. State survives a renderer/model failure. When Node/isolation is
-unavailable, scene warnings identify unavailable native calculations while
-OHLCV/custom IR and the user's native chart continue to work.
+A bounded isolated child receives chart JSON only and renders a trusted local
+document in ephemeral Chromium. No generic browsing/control tool is exposed.
+All HTTP/WebSocket requests are blocked, DNS is disabled, there are no remote
+fonts/datafeeds, and no credentials/config/environment secrets are inherited.
+The bundled DejaVu font supplies Arabic glyphs with the engine's text shaping.
+Fixed document and bundle checksums prevent model-generated script execution.
+Render failure preserves state and structured inspection. See
+[chart export deployment](chart-export.md) for prerequisites and limits.
 
 ## Persistence and boundaries
 
@@ -191,7 +181,7 @@ Working state and indicator definitions do not enter Dream/long-term memory.
 All mutations remain behind the existing policy-controlled tool execution path,
 chart permission checks, optimistic revisions and responsibility execution
 fencing. Protected data is not a workspace file. The new native calculation
-child uses the same hidden-state boundary as other process tools. OANDA/MetaApi
+child uses the same hidden-state boundary as other process tools. MetaApi
 secrets, account/trade approvals, effects and reconciliation were not relaxed.
 The frontend uses an isolated React-to-Pro adapter, trusted callbacks and
 backend-calculated custom series; it executes no model-supplied JavaScript.
@@ -200,7 +190,7 @@ backend-calculated custom series; it executes no model-supplied JavaScript.
 
 Only JSON IR import is supported. Built-in backend values require Node 24 and
 working process isolation; client-native rendering does not. Chart snapshots
-are deterministic approximations for complex overlays. Band boundaries are
+use the pinned native overlays and require the documented render-only dependencies. Band boundaries are
 rendered as series, not arbitrary custom shaders. Cursor replay is a short
 visual representation, not a playback journal. The user's crosshair is reported
 as a throttled semantic point by the authenticated client, separately from the
@@ -222,8 +212,7 @@ the same. Source SHA-256:
 No installed source is edited and no fork is fetched. Prebundling excludes this
 pinned core so the guard runs in development as well as production. The adapter
 uses the real candle-pane width and right spacing to frame the semantic count.
-The rasterizer uses uniform candle-index spacing, including across market gaps,
-matching the native chart's time-scale convention.
+Image export uses the native candle-index time scale, including market gaps.
 
 
 ## Conversation chart panel and analysis cards
@@ -231,7 +220,7 @@ matching the native chart's time-scale convention.
 The conversation header has a chart button on gateways advertising
 `webui.cloud-chart.workspace.v1`. It opens a collapsible bottom panel above the
 composer, without model inference. Saved authorized charts can be selected,
-or the user can choose an instrument from the actual OANDA account catalog to
+or the user can choose an instrument from the selected broker account catalog to
 create a chart. No chart/top-level dashboard is added. Folding unmounts the
 renderer/feed subscription, not backend state. Switching conversations preserves
 the message viewport and drafts, and resets only the panel’s resource view.
@@ -244,9 +233,9 @@ private worker ownership and user drawing protections remain authoritative.
 
 The `market` tool now supports `capabilities`, advertised instrument aliases,
 and a single `instrument` argument for quotes/candles. Aliases are matched
-against OANDA’s account catalog, not inferred as executable broker mappings.
-Explicit provider/canonical pairs remain compatible; D1/W1/MN1 map to OANDA’s
-D/W/M granularities. Provider errors still fail explicitly and safely.
+against that account's exact broker catalog. Native canonical identities are
+account-scoped; punctuation and suffixes are preserved. Timeframes follow MT4/MT5
+capabilities. Missing/ambiguous instruments fail explicitly and safely.
 
 `market(operation="recommendation", recommendation={...})` validates a
 bounded display-only recommendation and returns a `market_recommendation`
@@ -262,3 +251,8 @@ The agent tool descriptions specify when cards/chart references are appropriate
 Financial approval cards show direction and exact broker/account parameters
 from the backend approval record; model-supplied fields cannot replace them.
 The existing exact-action resolution/execution rules are unchanged.
+
+Financial cards allow authenticated **Edit lot**. Editing requests a fresh
+broker-verified preview and replaces the pending approval atomically. It never
+executes, inherits approval or changes accounts. Reloading the original card
+restores the replacement; stale/expired/consumed approvals cannot be reused.

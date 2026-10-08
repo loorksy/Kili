@@ -2,7 +2,8 @@
 
 Nanobot's AgentLoop/AgentRunner, ToolRegistry, SessionManager, cron, local
 triggers, channels and existing WebUI remain the execution and product surfaces.
-There is no second agent, gateway, scheduler, memory engine, browser or computer.
+There is no second agent, gateway, scheduler, memory engine, general browser or computer. Chart image export has a narrowly scoped
+local, ephemeral KLineChart renderer; it cannot navigate or browse.
 Rakazo was studied for fencing, action binding and workspace patterns; its
 runtime and UI are not dependencies. Dream, compaction, skills and MCP retain
 their existing roles. Operational state is not Dream memory.
@@ -114,25 +115,22 @@ result and wakes the parent once. Restart interruption becomes explicit
 uncertainty, not automatic tool replay. Child results and shared chart writes
 cannot overwrite a superseding parent generation.
 
-## OANDA and market observation
+## Broker market observation
 
-`market` provides instruments, quote, candles/history and timeframes through
-OANDA v20 practice/live adapters. Decimal normalized candles preserve canonical
-and provider identity, UTC start time, OHLC, volume, completeness, source and
-fetch time. Quotes preserve provider observation time and freshness. Analysis
-data does not authorize treating a broker price as identical.
+`market` uses the selected MetaApi account through the official isolated SDK
+connector. Its exact broker catalog covers all advertised symbols without
+suffix stripping or a preferred instrument. Account-scoped canonical identities,
+Decimal quotes and candles retain provider/account identity, UTC timestamps,
+completeness and freshness. MT4/MT5 timeframes follow platform capabilities.
+History is bounded and paged; protected cache identities include account,
+provider, instrument and timeframe. Cached offline evidence is explicitly stale.
 
-The protected cache merges by timestamp, retains at most 5,000 candles per
-instrument/timeframe and computes content revisions. Older history is paged from
-the provider. Cached offline history is explicitly marked stale.
-
-`market_watch` stores threshold/crossing or new-completed-candle conditions for
-an owned responsibility. Only active watchers poll; grouped quote checks and
-bounded outage backoff are cheap and contain no LLM call. Conditions fire one
-stable wake; broad monitoring uses agent-selected conditions plus semantic
-reevaluation schedules. No trading methodology or default indicator strategy is
-built in. These durable watchers retain their configured observation cadence;
-they do not invoke the LLM for individual prices.
+`market_watch` stores account-bound threshold/crossing or completed-candle
+conditions. Only active watchers perform cheap observations, with outage
+backoff and stable deduplicated responsibility wakes; there is no quote-to-LLM
+loop. Legacy OANDA watchers are disabled with `needs_account_binding` rather
+than silently rebound. OANDA is no longer a selectable runtime integration.
+Old evidence and charts retain their original source as read-only archives.
 
 ## Cloud charts and the KLineChart Pro bridge
 
@@ -146,30 +144,22 @@ also hold execution fencing. Market refresh does not invalidate annotation edits
 Trading-chart code fences open a lazy interactive chart in the conversation’s collapsible bottom workspace. A header chart button can also restore or create a chart without agent inference.
 Authenticated backend snapshots/paged candle requests restore state after
 unmount/restart. Existing WebSocket events carry chart/revision identifiers,
-not complete histories. Visible clients subscribe to OANDA pricing through one
-shared, bounded backend stream and the existing authenticated WebSocket. Quotes
-update bid/ask and provisional current candles without a 30-second client poll.
-REST remains authoritative for history/completed candles. Closing/hiding charts
-releases price subscriptions without removing backend state. Structured
-timeframe/price-level controls persist user edits. Optional persisted studies
-are validated and rendered; there is no mandatory strategy.
-
-Streaming uses `stream-fxpractice.oanda.com` or `stream-fxtrade.oanda.com`, with
-the same protected OANDA secret reference. Deployment egress must allow the
-chosen streaming origin in addition to the REST origin. No credentials are sent
-to the browser. Quotes retain their provider time; inactive/disconnected feeds
-are labeled, rather than treating cached prices as live. OANDA streams sampled
-prices (at most four updates per second per instrument), not every broker tick;
-network latency and provider sampling remain. The optional WebUI capability
-`webui.cloud-chart.prices.v1` leaves protocol 1 unchanged: older clients keep
-their existing reads, and newer clients on older hosts retain chart history but
-show that the gateway needs an update for live pricing.
+not complete histories. Visible clients subscribe to their chart's original
+broker account through the shared SDK streaming connection and authenticated
+WebSocket. Quotes update bid/ask promptly without a client polling loop.
+OHLC candles are official broker history, never fabricated from quote midpoints.
+History reconciliation is independent of quotes (at most once per minute and
+on bar rollover); candle refresh may therefore lag streamed bid/ask.
+Closing charts releases subscriptions without removing state. Source timestamps,
+reconnect/stale indicators and the existing capability negotiation remain.
+Provider delivery cadence and network latency cannot be eliminated.
 
 React wraps `@klinecharts/pro` 0.1.1 with `klinecharts` 9.8.12. A build-only,
 checksum-guarded adapter preserves the Solid disposer and exposes `destroy`;
 node_modules is untouched. The authenticated Nanobot datafeed replaces Polygon.
 See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for Apache-2.0 notices and
-the documented delta. Solid stays isolated; no remote browser renders charts.
+the documented delta. Solid stays isolated. The same adapter and pinned library also render optional
+chart-only exports in an ephemeral local process with networking blocked.
 The agent-operated workstation extends this bridge with semantic viewport
 control, finite-anchor drawing discovery, indicators, an optional chart-only
 image renderer and ephemeral virtual agent presence. User drawings persist
@@ -182,8 +172,9 @@ library deltas, permissions and rendering limits, and the
 ## MetaApi, proposals and execution
 
 `account` provides connection/account, positions, orders, exact symbols,
-specifications and broker prices. Read-only support uses deterministic fixtures
-and fixed MetaApi REST/provisioning endpoints; no broker password enters tools.
+specifications and broker prices. Production uses the official MetaApi SDK in a protected, separate Python
+environment, with synchronized connections and fixed operations. Deterministic
+fixtures need no credentials; no broker password enters tools.
 Settings explicitly verifies account-specific canonical-to-broker mappings using
 the symbol list/specification. There is no string-replacement mapping heuristic.
 
@@ -226,7 +217,7 @@ runtime/config isolation through actual shell/CLI/MCP processes, approval bindin
 secret sentinels, provider fixtures, no-replay execution, conservative recovery,
 chart persistence/CAS, frontend remount and regressions across existing Nanobot.
 No automated test places a live trade. Optional read-only tests require
-`NANOBOT_TEST_OANDA_ENABLE=1` / `NANOBOT_TEST_METAAPI_ENABLE=1` and matching
+`NANOBOT_TEST_METAAPI_ENABLE=1` and matching
 `_TOKEN`, `_ACCOUNT` (plus optional `_REGION`) environment variables. Their
 absence skips only private read verification, not implementation tests.
 

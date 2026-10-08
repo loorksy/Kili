@@ -1,3 +1,6 @@
+> Historical report. Broker integration, chart exports and chat authorization
+> are superseded by [the broker upgrade](broker-upgrade-report.md).
+
 # Implemented Nanobot runtime: completion report
 
 This report covers the accepted Phase 0–3 foundation and the implementation of

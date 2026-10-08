@@ -23,8 +23,10 @@ The existing approval system binds the exact envelope, account, supervision
 baseline, principal, goal/plan and responsibility to a canonical fingerprint.
 Only a user resolution can approve it. Activation consumes that approval in
 the same SQLite transaction that activates the mandate and goal. A mandate
-cannot activate twice. LIVE additionally requires the disabled-by-default
-`tools.integrations.autonomousTradingEnabled` operator setting.
+cannot activate twice. LIVE authority comes from that exact chat approval,
+not a routine Settings toggle. The trusted `delegatedTradingBlocked` operator
+kill switch and account/emergency guardrails dominate all mandates. Legacy
+`autonomousTradingEnabled` is retained for configuration compatibility only.
 
 Limits and instrument/action scopes can be tightened. Mode, account, start,
 supervision and finish behaviors cannot be changed through reduction. Expansion
@@ -42,7 +44,7 @@ TradeExecutor. Hard failures cannot be overridden by a mandate or reviewer.
 MandateAuthority refreshes trusted account evidence and obtains broker symbol
 specifications/prices. The risk calculation uses Decimal, protective stops,
 volume, broker tick-loss values or a directly convertible contract size. It
-does not trust model-supplied loss estimates or OANDA execution prices. Missing
+does not trust model-supplied loss estimates or prices from another broker account. Missing
 protection, currency conversion, fresh prices, account state or attribution
 blocks new exposure. Broker margin is obtained through the controlled margin
 endpoint. Pending orders count toward potential simultaneous fills and reserve
@@ -162,9 +164,10 @@ automated tests use fixed MockTransport fixtures and never trade real money.
 The `trading_mission` chat fence resolves a backend-owned ID. It displays goal,
 mode/state, performance completeness, remaining loss budget, expiry and mandate
 details with pause/resume/cancel/emergency controls. Approvals use the existing
-action card. Settings/System hosts the optional live-delegation switch. Enable
-requires gateway restart; disable immediately freezes existing account risk
-guardrails. No new top-level page or realtime transport is introduced.
+action card. The routine live-delegation Settings toggle is removed. Explicit
+chat mandate approval is required; trusted operator blocking and emergency stop
+still freeze new risk. A previously disabled account guard is not re-enabled
+by removing the toggle. No new top-level page or realtime transport is introduced.
 
 Live provider reconciliation of ambiguous modifications/closures remains
 conservative rather than guessing. Missing broker conversion/attribution is a

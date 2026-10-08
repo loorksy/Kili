@@ -34,7 +34,7 @@ class TradePrepareTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Create/read a durable trade proposal or generate a broker-verified preview. No broker mutation. Exact instrument mapping must first be verified by the user in Settings."
+        return "Create/read a durable trade proposal or generate a broker-verified preview. No broker mutation. Discover exact account-scoped canonical_instrument IDs with market operation=instruments; do not guess broker symbols. Create requires intent, including the proposed/user-requested lot volume. Preview requires the returned proposal_id. Legacy custom mappings require user verification. Execution requires the separate policy/approval path; users can edit lot size on its chat approval card, which replaces the old preview authority."
 
     @property
     def parameters(self) -> dict[str, Any]:
