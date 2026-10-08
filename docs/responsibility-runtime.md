@@ -1,9 +1,10 @@
-# Durable responsibilities: Phases 0–3
+# Durable responsibilities
 
 Nanobot's existing goal tools, AgentLoop, automation turn admission, cron and
 local trigger delivery own this feature. There is no additional agent runtime,
-scheduler, memory engine or UI navigation. Later policy, approval, effects,
-market, account and chart phases are not implemented here.
+scheduler, memory engine or UI navigation. The integrations, action boundary,
+charts and execution built on this foundation are documented in
+[persistent-trading-runtime.md](persistent-trading-runtime.md).
 
 ## Source and retired implementation
 
@@ -34,12 +35,12 @@ Writes hold a cross-process FileLock, replace atomically, and fsync the file and
 parent directory. Internal directories are private and records are mode 0600.
 Permissions alone do not protect against same-UID tools:
 
-* File tools reject resolved internal paths, including workspace symlink aliases,
+* File tools reject resolved internal paths and the active configuration file, including workspace symlink aliases,
   even when workspace restriction is disabled or an extra file root is granted.
 * Shell, persistent exec sessions, delegated shell work, installed CLI execution
   and local stdio MCP servers receive an obligatory outer OS sandbox.
 * Linux uses bubblewrap with a private user/PID namespace, dropped capabilities,
-  an empty read-only mount over internal state, and read-only runtime code.
+  an empty read-only mount over internal state, a masked config file, and read-only runtime code.
   Ancestor mount points prevent rename escapes. Configured workspace sandboxes
   run inside that boundary; extra binds cannot expose original state.
 * Outside those protected roots, the existing filesystem access choice remains
@@ -56,11 +57,11 @@ servers are an operator trust boundary: their deployment must not independently
 share the gateway's internal disk. This code cannot sandbox another service.
 No CA/trust changes or TLS verification bypasses were made.
 
-## Version 2 record
+## Version 4 record
 
 | Field | Meaning |
 | --- | --- |
-| `version`, `id`, `revision` | Schema version 2, independent UUID identity, monotonic CAS revision |
+| `version`, `id`, `revision` | Schema version 4, independent UUID identity, monotonic CAS revision |
 | `objective`, `ui_summary`, `progress` | Bounded objective/display label and operational progress |
 | `state` | QUEUED, RUNNING, WAITING, WAITING_FOR_USER, WAITING_FOR_EVENT, WAITING_FOR_SUBAGENT, SCHEDULED, PAUSED, COMPLETED, FAILED or CANCELLED |
 | `session_key`, `channel`, `chat_id` | Optional conversation association and delivery route, not ownership |
@@ -72,6 +73,9 @@ No CA/trust changes or TLS verification bypasses were made.
 | `execution_generation`, `execution_token`, `active_wake_id` | Backend execution ownership; token never enters model context, metadata, history or tool output |
 | `recovery_required` | Interrupted/uncertain execution requires reconciliation and explicit resumption |
 | `created_at_ms`, `updated_at_ms` | UTC audit timestamps |
+| `schedule` | Versioned exact, relative, interval or timezone-aware calendar schedule |
+| `parent_responsibility_id`, `parent_execution_generation`, `delegation_id` | Existing subagent handoff ownership |
+| `result_summary` | Concise delegated result, separate from private reasoning |
 
 A receipt holds `state` (QUEUED/STARTED/COMPLETED/UNCERTAIN/DISCARDED), bounded
 event content, attempts, start time and finish time. Attempt/wake metadata is the
@@ -123,10 +127,12 @@ checkpoint merely by opening or chatting in the linked session.
 
 ## Wakeups and delivery
 
-The existing cron service registers `responsibility_wakes` every 30 seconds.
-A tick scans durable records; an empty/no-due scan submits no turn and performs
-no inference. Due work first persists a receipt, atomically claims ownership,
-then submits to Nanobot's existing cron automation turn infrastructure.
+The existing cron timer selects the nearest deadline across native cron jobs,
+responsibilities, active market watchers and reconciliation. Schedule changes
+re-arm that timer. A 30-second safety sweep remains for recovery; it does not
+define user timing or invoke inference when nothing is due. Due work first
+persists a receipt, atomically claims ownership, then submits to Nanobot's
+existing cron automation turn infrastructure.
 
 Scheduled wake identity is `schedule:<wake_generation>:<due-ms>`; local-trigger
 identity is `trigger:<delivery-id>`. Admission and upstream delivery acknowledgment
@@ -135,8 +141,10 @@ same receipt twice. Changed schedule generations discard obsolete queued
 schedule receipts. Concurrent scans share the same locked admission check.
 
 After downtime, one overdue schedule becomes one coalesced occurrence rather
-than a burst of replayed periodic intervals. Once it finishes, the agent must
-explicitly choose its next wait. A disabled channel leaves the receipt queued.
+than a burst of replayed periodic intervals. Interval schedules retain their
+original anchor; calendar schedules use the specified timezone. Native recurring
+schedules compute their next occurrence after completion. One-time waits need a
+new explicit schedule. A disabled channel leaves the receipt queued.
 The scan currently reads JSON records and stored receipts; it is cheap relative
 to inference, but not an indexed high-volume scheduler.
 
@@ -171,12 +179,13 @@ not a transaction spanning both stores. If a projection write fails after
 creation, the durable record remains discoverable by list/ID and may need bind.
 
 Receipts currently have no retention/compaction policy. Storage uses local
-filesystem locking, not a distributed database. Subagent handoff/recovery,
-external effects reconciliation, policy/approval, market/account adapters and
-persistent charts remain later phases. This foundation prevents automatic
-replay of uncertain work; it does not claim exactly-once external side effects.
+filesystem locking, not a distributed database. Protected operational records
+and effects now also hold immutable responsibility ownership during writes.
+Subagent parent generations fence delegated publication. The action journal
+reconciles uncertain trades with bounded read-only attempts and never assumes
+exactly-once external network execution.
 
-## Verification of the hardened foundation
+## Historical verification of the hardened Phase 0–3 foundation
 
 The final selected Python regression run passed **1,667 tests**, with **41
 platform-specific skips** and no failures. It covered all `tests/session`,

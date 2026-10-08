@@ -6,6 +6,12 @@
 .env
 .web
 .orion
+/config.json
+/internal/
+/.nanobot/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Claude / AI assistant artifacts
 docs/superpowers/
