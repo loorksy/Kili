@@ -27,6 +27,7 @@ import {
   modelPresetOptionsFromSettings,
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
+import { ChartWorkspaceProvider, ChartWorkspaceButton } from "@/components/charts/ChartWorkspace";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -1867,7 +1868,7 @@ export function ThreadShell({
       hideSidebarToggle={hideSidebarToggle}
       hideThemeButton={hideThemeButton}
       hideTitle={hideHeaderTitle}
-      actions={headerActions}
+      actions={<><ChartWorkspaceButton />{headerActions}</>}
       minimal={!session && !loading}
       promptNavigatorAction={promptNavigatorAction}
       sessionInfoAction={sessionInfoAction}
@@ -1886,6 +1887,7 @@ export function ThreadShell({
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
+    <ChartWorkspaceProvider sessionKey={historyKey ?? ""}>
     <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -1984,6 +1986,7 @@ export function ThreadShell({
         </FileActionsProvider>
       ) : null}
     </section>
+    </ChartWorkspaceProvider>
     </SubagentTasksProvider>
   );
 }

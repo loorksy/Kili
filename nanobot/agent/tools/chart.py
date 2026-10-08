@@ -112,7 +112,7 @@ class ChartTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Operate the persistent cloud chart with semantic timestamps/prices: capabilities discovery, historical loading, view zoom/pan/jump/range, exact candle inspection, drawings and virtual cursor. Include expected_revision for edits and object_revision for drawing edits. Temporary drawings require explicit publication. Return the trading_chart code fence to embed it in chat."
+        return "Operate the persistent cloud chart with semantic timestamps/prices: capabilities discovery, historical loading, view zoom/pan/jump/range, exact candle inspection, drawings and virtual cursor. Include expected_revision for edits and object_revision for drawing edits. Temporary drawings require explicit publication. Return the trading_chart code fence when the user requests chart analysis or a recommendation benefits from a visual chart; it opens the collapsible chart workspace. Do not open charts for greetings, simple quotes, or every background tick. A chart reference is not an image attachment; use chart_snapshot format=attachment and message media when the user asks for a picture."
 
     @property
     def parameters(self) -> dict[str, Any]:

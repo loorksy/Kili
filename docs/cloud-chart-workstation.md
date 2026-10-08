@@ -224,3 +224,41 @@ pinned core so the guard runs in development as well as production. The adapter
 uses the real candle-pane width and right spacing to frame the semantic count.
 The rasterizer uses uniform candle-index spacing, including across market gaps,
 matching the native chart's time-scale convention.
+
+
+## Conversation chart panel and analysis cards
+
+The conversation header has a chart button on gateways advertising
+`webui.cloud-chart.workspace.v1`. It opens a collapsible bottom panel above the
+composer, without model inference. Saved authorized charts can be selected,
+or the user can choose an instrument from the actual OANDA account catalog to
+create a chart. No chart/top-level dashboard is added. Folding unmounts the
+renderer/feed subscription, not backend state. Switching conversations preserves
+the message viewport and drafts, and resets only the panel’s resource view.
+
+An assistant `trading_chart` reference becomes a compact View chart button in
+chat and opens this workspace once per reference. Subsequent ticks or rerenders
+do not reopen a chart the user folded. Non-conversation hosts retain their
+existing embedded-chart fallback. Existing chart revisions, authorization,
+private worker ownership and user drawing protections remain authoritative.
+
+The `market` tool now supports `capabilities`, advertised instrument aliases,
+and a single `instrument` argument for quotes/candles. Aliases are matched
+against OANDA’s account catalog, not inferred as executable broker mappings.
+Explicit provider/canonical pairs remain compatible; D1/W1/MN1 map to OANDA’s
+D/W/M granularities. Provider errors still fail explicitly and safely.
+
+`market(operation="recommendation", recommendation={...})` validates a
+bounded display-only recommendation and returns a `market_recommendation`
+fence. BUY, SELL, WAIT, WATCH and AVOID cards show intent, entry area, proposed
+protection/targets, summary and evidence time when provided. Prices remain
+Decimal strings. Optional chart references must pass backend chart access
+checks. Cards persist through existing conversation history, not a second
+trading engine. They do not grant approval, execute orders, or promise results.
+The agent tool descriptions specify when cards/chart references are appropriate
+(actionable analysis or user-requested recommendations), and when to omit them
+(greetings, simple quotes and every background tick).
+
+Financial approval cards show direction and exact broker/account parameters
+from the backend approval record; model-supplied fields cannot replace them.
+The existing exact-action resolution/execution rules are unchanged.

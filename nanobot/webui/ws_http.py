@@ -966,7 +966,12 @@ class GatewayHTTPHandler:
 
     async def _handle_cloud_resource(self, request: WsRequest, path: str) -> Response:
         from nanobot.market.oanda import ProviderUnavailableError
-        from nanobot.webui.cloud_resources import chart_snapshot, resolve_approval, update_chart
+        from nanobot.webui.cloud_resources import (
+            chart_snapshot,
+            list_charts,
+            resolve_approval,
+            update_chart,
+        )
 
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1012,10 +1017,13 @@ class GatewayHTTPHandler:
                                             self.bus, principal, payload["operation"])
             else:
                 chart_id = (query.get("chart_id") or [""])[0]
-                before = (query.get("before") or [None])[0]
-                count = int((query.get("count") or ["500"])[0])
-                result = await chart_snapshot(self.settings.config.load(), chart_id, principal,
-                                              candles=path.endswith("/candles"), before=before, count=count)
+                if not chart_id and path == "/api/webui/cloud-charts":
+                    result = await list_charts(self.settings.config.load(), principal)
+                else:
+                    before = (query.get("before") or [None])[0]
+                    count = int((query.get("count") or ["500"])[0])
+                    result = await chart_snapshot(self.settings.config.load(), chart_id, principal,
+                                                  candles=path.endswith("/candles"), before=before, count=count)
             return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
         except PermissionError:
             return _http_error(403, "Resource is outside this scope")

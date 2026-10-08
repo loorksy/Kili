@@ -16,6 +16,29 @@ from nanobot.security.actions import ActionStore
 from nanobot.session.manager import SessionManager
 
 
+async def list_charts(config: Config, principal: str) -> dict[str, object]:
+    if not config.tools.integrations.charts_enabled:
+        raise PermissionError("Cloud charts are disabled")
+    service = ChartService()
+    actor = ChartActor(principal=principal)
+    rows: list[dict[str, object]] = []
+    for chart in sorted(service.records.list(), key=lambda item: (item.updated_at, item.created_at, item.id)):
+        try:
+            service.require_access(chart, actor)
+        except PermissionError:
+            continue
+        rows.append(dict(chart.contract()))
+    instruments: list[dict[str, str]] = []
+    market_unavailable = False
+    connection = config.tools.integrations.oanda
+    if connection is not None:
+        try:
+            instruments = [{"name": item.name, "display_name": item.display_name} for item in await OandaClient(connection).instruments()]
+        except ProviderUnavailableError:
+            market_unavailable = True
+    return {"charts": rows, "instruments": instruments, "market_unavailable": market_unavailable}
+
+
 async def chart_snapshot(config: Config, chart_id: str, principal: str,
                          *, candles: bool = False, before: str | None = None, count: int = 500) -> dict[str, object]:
     if not config.tools.integrations.charts_enabled:
@@ -78,6 +101,13 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
         raise PermissionError("Cloud charts are disabled")
     # Validate once before binding an authenticated user interaction.
     parsed = ChartRequest.model_validate(payload)
+    if parsed.operation == "create":
+        connection = config.tools.integrations.oanda
+        if connection is None:
+            raise ValueError("OANDA connection is not configured")
+        names = {item.name for item in await OandaClient(connection).instruments()}
+        if parsed.provider_instrument not in names or parsed.canonical_instrument != parsed.provider_instrument:
+            raise ValueError("Select an advertised OANDA instrument")
     ctx = ToolContext(config=config.tools, workspace=str(sessions.workspace), bus=bus, sessions=sessions)
     registry = ToolRegistry()
     registry.register(ChartTool(ctx))
@@ -87,7 +117,12 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
     if getattr(result, "is_error", False):
         raise ValueError(str(result))
     if not parsed.chart_id:
-        raise ValueError("Client changes require an existing chart id")
+        if parsed.operation != "create":
+            raise ValueError("Client changes require an existing chart id")
+        import json
+        # The registered executor created this reference, never the client.
+        reference = json.loads(str(result).removeprefix("```trading_chart\n").removesuffix("\n```"))
+        parsed.chart_id = str(reference["chart_id"])
     if parsed.operation == "report_crosshair":
         return ChartService().get(parsed.chart_id, ChartActor(principal=principal)).model_dump(mode="json")
     return await chart_snapshot(config, parsed.chart_id, principal)

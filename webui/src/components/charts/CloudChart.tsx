@@ -6,7 +6,7 @@ import { parseChartReference, type CloudChartState } from "./contract";
 import { mountCloudChart, type ChartMount } from "./pro-adapter";
 import { observeChartPrices, type ChartPriceEvent } from "./live-feed";
 
-export function CloudChart({ reference }: { reference: string }) {
+export function CloudChart({ reference, docked = false }: { reference: string; docked?: boolean }) {
   const parsed = parseChartReference(reference);
   const chartId = parsed?.chart_id;
   const sessionKey = parsed?.session_key;
@@ -103,7 +103,7 @@ export function CloudChart({ reference }: { reference: string }) {
       </select>}
     </div>
     {error && <p className="p-2 text-xs text-destructive" role="status">{error}</p>}
-    <div ref={container} className="h-[360px] w-full min-w-0 sm:h-[440px]" />
+    <div ref={container} style={docked ? { height: "clamp(180px, calc(60dvh - var(--chart-composer-height, 0px) - 9rem), 440px)" } : undefined} className="h-[360px] w-full min-w-0 sm:h-[440px]" />
     <div className="flex flex-wrap gap-2 p-2 text-xs">
       <button disabled={!chart} onClick={() => { const view = mountedChart.current?.viewport?.(); if (view) void change({ operation: "load_history", history_count: view.count, history_before: view.before }); else setError("Chart data is still loading."); }}>Save view</button>
       <input aria-label="Annotation price" className="w-28 rounded border bg-background px-2" value={price} onChange={e => setPrice(e.target.value)} placeholder="Price" />

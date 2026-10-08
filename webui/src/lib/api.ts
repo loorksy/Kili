@@ -1428,3 +1428,8 @@ export function controlTradingMission(transport: WebUIMutationTransport, session
 export function configureAutonomousTrading(transport: WebUIMutationTransport, enabled: boolean) {
   return mutation<IntegrationStatus>(transport, "settings.integrations.autonomy", { enabled });
 }
+
+export function listCloudCharts(token: string, sessionKey: string) {
+  return request<{ charts: (import("@/components/charts/contract").ChartReference & { instrument: string; timeframe: string })[]; instruments: { name: string; display_name: string }[]; market_unavailable: boolean }>(
+    `/api/webui/cloud-charts?session_key=${encodeURIComponent(sessionKey)}`, token);
+}

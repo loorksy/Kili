@@ -143,7 +143,7 @@ Annotations preserve creator, updater, timestamps, responsibility/evidence
 references and revision. Chart edits require expected revision; protected writes
 also hold execution fencing. Market refresh does not invalidate annotation edits.
 
-Trading-chart code fences embed lazy interactive charts in existing chat.
+Trading-chart code fences open a lazy interactive chart in the conversation’s collapsible bottom workspace. A header chart button can also restore or create a chart without agent inference.
 Authenticated backend snapshots/paged candle requests restore state after
 unmount/restart. Existing WebSocket events carry chart/revision identifiers,
 not complete histories. Visible clients subscribe to OANDA pricing through one

@@ -493,6 +493,24 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("keeps chart controls in the existing header and opens the bottom workspace without model inference", async () => {
+    const client = makeClient();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/cloud-charts?")) return httpJson({ charts: [], instruments: [], market_unavailable: false });
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    render(wrap(client, <ThreadShell session={session("chart-control")} title="Chart control" onToggleSidebar={() => {}} />,
+      null, "tok", ["webui.core.v1", "webui.cloud-chart.workspace.v1"]));
+    const button = await screen.findByRole("button", { name: "Open chart" });
+    expect(screen.getByTestId("thread-header")).toContainElement(button);
+    fireEvent.click(button);
+    expect(await screen.findByLabelText("Chart workspace")).toBeVisible();
+    expect(screen.getByTestId("thread-composer-dock")).toBeVisible();
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse chart" }));
+    expect(screen.queryByLabelText("Chart workspace")).toBeNull();
+  });
+
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {

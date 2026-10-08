@@ -892,3 +892,11 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector(".katex")).toBeInTheDocument();
   });
 });
+
+it.each([false, true])("projects a structured market fence as an analysis card (streaming=%s)", async streaming => {
+  const body = "```market_recommendation\n" + JSON.stringify({ instrument: "XAU_USD", intent: "SELL", summary: "Fixture market analysis", entry: ["2700.20"], stop_loss: "2705", targets: ["2690"] }) + "\n```";
+  render(<MarkdownTextRenderer streaming={streaming}>{body}</MarkdownTextRenderer>);
+  expect(await screen.findByLabelText("Market recommendation")).toHaveTextContent("2700.20");
+  expect(screen.getByText("Sell")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Execute" })).toBeNull();
+});

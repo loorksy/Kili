@@ -41,3 +41,14 @@ describe("Backend-owned approval", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 });
+
+it("renders financial direction and exact backend terms without trusting model-authored action", async () => {
+  mocks.read.mockResolvedValue({ id, status: "PENDING", action: { account_id: "actual-account", broker_symbol: "GOLDm",
+    intent: { operation: "open", side: "sell", order_type: "limit", volume: "0.10", price: "2700.20", stop_loss: "2705", take_profit: "2690" } } });
+  render(<ActionApproval reference={reference} />);
+  expect(await screen.findByText("Sell request")).toBeVisible();
+  expect(screen.getByText("GOLDm")).toBeVisible();
+  expect(screen.getByText("2700.20")).toBeVisible();
+  expect(screen.getByText("Approval applies only to these exact parameters. This is not an executed trade.")).toBeVisible();
+  expect(screen.queryByText(/forged benign/)).toBeNull();
+});
