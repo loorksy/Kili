@@ -112,6 +112,8 @@ class TradeProposals:
             from nanobot.trading.mission_models import TradingMandate
             mandate = RecordStore("trading_mandates",TradingMandate,self.proposals.journal).get(mandate_id)
             self.require_owner(principal,mandate.principal)
+            if mandate.envelope.account_id != self.client.connection.account_id:
+                raise PermissionError("Mandate does not authorize this connected account")
             if responsibility_id != mandate.responsibility_id:
                 raise PermissionError("Delegated proposal requires its owning responsibility")
             plan_id = mandate.plan_id
@@ -126,11 +128,15 @@ class TradeProposals:
 
     def record_lifecycle(self, proposal: TradeProposal, kind: str, preview_id: str | None = None) -> None:
         from nanobot.trading.execution import TradeJournalEntry
+        from nanobot.trading.mission_models import TradingMandate, TradingPlan
         journal = RecordStore("trade_journal", TradeJournalEntry, self.proposals.journal)
+        mandate = RecordStore("trading_mandates",TradingMandate,self.proposals.journal).get(proposal.mandate_id) if proposal.mandate_id else None
+        plan = RecordStore("trading_plans",TradingPlan,self.proposals.journal).get(proposal.plan_id) if proposal.plan_id else None
         identity = hashlib.sha256(f"{proposal.id}:{kind}:{preview_id}".encode()).hexdigest()
         journal.create(TradeJournalEntry(id="journal_" + identity, proposal_id=proposal.id,
             responsibility_id=proposal.responsibility_id, preview_id=preview_id, kind=kind,
-            evidence_refs=proposal.evidence_refs))
+            evidence_refs=proposal.evidence_refs,mandate_id=proposal.mandate_id,plan_id=proposal.plan_id,
+            plan_version=plan.plan_version if plan else None,goal_id=mandate.goal_id if mandate else None))
 
     @staticmethod
     def validate_spec(intent: TradeIntent, spec: SymbolSpec) -> None:

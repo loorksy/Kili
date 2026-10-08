@@ -56,6 +56,22 @@ def insert_record(db: sqlite3.Connection, namespace: str, record: RuntimeRecord)
     db.execute("INSERT INTO records VALUES (?,?,?,?)",(namespace,record.id,record.revision,record.model_dump_json()))
 
 
+def reject_mandate_approval(db: sqlite3.Connection, approval: Approval) -> None:
+    identity = approval.action.parameters.get("mandate_id")
+    if not isinstance(identity,str):
+        return
+    if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='records'").fetchone() is None:
+        return
+    try:
+        mandate = read_record(db,"trading_mandates",identity,TradingMandate)
+    except ValueError:
+        return  # Denial still succeeds if a draft was already removed.
+    if (mandate.status == "AWAITING_MANDATE_APPROVAL" and mandate.principal == approval.resolved_by
+            and TradingMissions.approval_action(mandate).fingerprint == approval.fingerprint):
+        mandate.status = "CANCELLED"
+        write_record(db,"trading_mandates",mandate)
+
+
 class TradingMissions:
     def __init__(self, client: MetaApiClient, journal: ActionStore | None = None, *, live_enabled: bool = False):
         self.client, self.journal, self.live_enabled = client, journal or ActionStore(), live_enabled
@@ -70,7 +86,22 @@ class TradingMissions:
         if record.principal != principal:
             raise PermissionError("Trading mission belongs to another conversation")
 
-    async def observe(self) -> AccountObservation:
+    def audit(self, mandate: TradingMandate, kind: str) -> None:
+        from nanobot.trading.execution import TradeJournalEntry
+        entries = RecordStore("trade_journal",TradeJournalEntry,self.journal)
+        identity = "mission_journal_"+hashlib.sha256(f"{mandate.id}:{mandate.revision}:{kind}".encode()).hexdigest()
+        try:
+            entries.get(identity)
+            return
+        except ValueError:
+            pass
+        plan = self.plans.get(mandate.plan_id)
+        entries.create(TradeJournalEntry(id=identity,proposal_id="",responsibility_id=mandate.responsibility_id,
+            approval_id=mandate.approval_id,kind=kind,mandate_id=mandate.id,goal_id=mandate.goal_id,
+            plan_id=plan.id,plan_version=plan.plan_version,
+            mission_pnl=str(mandate.realized_pnl+mandate.unrealized_pnl),evidence_refs=plan.evidence_refs))
+
+    async def observe(self, *, simulation: bool = False) -> AccountObservation:
         connected = await self.client.connection_state()
         if (connected.id != self.client.connection.account_id or connected.connection_status != "CONNECTED"
                 or connected.region != self.client.connection.region):
@@ -78,7 +109,11 @@ class TradingMissions:
         account = await self.client.account()
         positions = await self.client.items("positions")
         orders = await self.client.items("orders")
-        return AccountObservation(fetched_at=now_ms(),account=account,positions=positions,orders=orders)
+        observed = AccountObservation(fetched_at=now_ms(),account=account,positions=positions,orders=orders)
+        if simulation:
+            from nanobot.trading.mission_observation import simulated_account
+            observed,_,_ = await simulated_account(self,observed)
+        return observed
 
     def create_goal(self, goal: TradingGoal) -> TradingGoal:
         if goal.account_id != self.client.connection.account_id:
@@ -120,7 +155,7 @@ class TradingMissions:
                 or envelope.start_at < goal.start_at or envelope.expires_at > goal.end_at
                 or (goal.allowed_instruments and not set(envelope.allowed_instruments) <= set(goal.allowed_instruments))):
             raise ValueError("Mandate differs from the resolved goal/account/time scope")
-        baseline = await self.observe()
+        baseline = await self.observe(simulation=envelope.mode == "SIMULATION")
         if baseline.account.currency != envelope.currency or not baseline.account.trade_allowed:
             raise ValueError("Mandate account currency/permission is not verified")
         if envelope.allocated_capital > baseline.account.equity:
@@ -135,14 +170,17 @@ class TradingMissions:
         approval = self.journal.request(self.approval_action(record))
         goal.status = "AWAITING_MANDATE_APPROVAL"
         self.goals.save(goal)
+        self.audit(record,"MANDATE_PROPOSED")
         return record, approval
 
     async def activate(self, principal: str, mandate_id: str) -> TradingMandate:
         mandate = self.mandates.get(mandate_id)
         self.owner(principal,mandate)
+        if mandate.envelope.account_id != self.client.connection.account_id:
+            raise PermissionError("Mandate account differs from the configured connection")
         if mandate.envelope.mode == "LIVE" and not self.live_enabled:
             raise PermissionError("Live delegated trading is disabled in operator settings")
-        observed = await self.observe()
+        observed = await self.observe(simulation=mandate.envelope.mode == "SIMULATION")
         if observed.account.currency != mandate.envelope.currency or not observed.account.trade_allowed:
             raise ValueError("Account changed before activation")
         if mandate.envelope.supervision_position_id:
@@ -162,6 +200,12 @@ class TradingMissions:
             active = [TradingMandate.model_validate_json(row[0]) for row in db.execute("SELECT record FROM records WHERE namespace='trading_mandates'")]
             if any(m.goal_id == current.goal_id and m.status in {"ACTIVE","PAUSED","NEEDS_ATTENTION","RISK_STOPPED"} for m in active):
                 raise PermissionError("A mission already owns this goal; cancel before new authorization")
+            held = {RiskReservation.model_validate_json(row[0]).mandate_id for row in db.execute(
+                "SELECT record FROM records WHERE namespace='risk_reservations'")
+                if RiskReservation.model_validate_json(row[0]).state != "RELEASED"}
+            if any(m.envelope.account_id == current.envelope.account_id and m.envelope.mode != current.envelope.mode
+                    and (m.status in {"ACTIVE","PAUSED","NEEDS_ATTENTION","RISK_STOPPED"} or m.id in held) for m in active):
+                raise PermissionError("Live and simulation missions cannot share an active account risk ledger")
             try:
                 guard = read_record(db,"account_guardrails",current.envelope.account_id,AccountGuardrails)
             except ValueError:
@@ -178,6 +222,7 @@ class TradingMissions:
             goal = read_record(db,"trading_goals",current.goal_id,TradingGoal)
             goal.status = "ACTIVE"
             write_record(db,"trading_goals",goal)
+        self.audit(current,"MANDATE_ACTIVATED")
         return current
 
     def reduce(self, principal: str, mandate_id: str, envelope: MandateEnvelope) -> TradingMandate:
@@ -202,7 +247,9 @@ class TradingMissions:
             elif new[field] != old[field]:
                 raise PermissionError("Material mandate change requires new approval")
         mandate.envelope,mandate.scope_fingerprint = envelope,envelope.fingerprint
-        return self.mandates.save(mandate)
+        reduced = self.mandates.save(mandate)
+        self.audit(reduced,"MANDATE_REDUCED")
+        return reduced
 
     def control(self, principal: str, mandate_id: str, operation: str, *, user: bool) -> TradingMandate:
         mandate = self.mandates.get(mandate_id)
@@ -228,7 +275,9 @@ class TradingMissions:
             mandate.finish_kind = "emergency"
         else:
             raise ValueError("Unsupported mission control")
-        return self.mandates.save(mandate)
+        changed = self.mandates.save(mandate)
+        self.audit(changed,"MANDATE_"+operation.upper())
+        return changed
 
     @staticmethod
     def reserve_in_transaction(db: sqlite3.Connection, risk: RiskAssessment, effect_id: str,
@@ -278,6 +327,15 @@ class TradingMissions:
             notional=risk.proposed_notional,margin=risk.proposed_margin,risk_increasing=risk.risk_increasing,
             assessment=risk.model_dump(mode="json"),
             entry_kind=("pending" if pending else "market") if operation == "open" else None)
+        if risk.open_risk is not None:
+            before = min(envelope.max_open_risk,risk.remaining_loss)-risk.open_risk-sum((r.risk for r in own),Decimal(0))
+            reservation.mission_budget_before = before
+            reservation.mission_budget_after = before-risk.incremental_risk
+        if risk.account_open_risk is not None:
+            account_guard = read_record(db,"account_guardrails",risk.account_id,AccountGuardrails)
+            before = account_guard.max_open_risk-risk.account_open_risk-sum((r.risk for r in outstanding),Decimal(0))
+            reservation.account_budget_before = before
+            reservation.account_budget_after = before-risk.incremental_risk
         insert_record(db,"risk_reservations",reservation)
         return reservation
 
@@ -295,10 +353,23 @@ def admit_delegation(journal: ActionStore, db: sqlite3.Connection, effect: Effec
     if (current is None or current.action.fingerprint != effect.fingerprint
             or grant.action_fingerprint != effect.fingerprint or effect.action.tool != "trade_execute"):
         raise PermissionError("No exact gateway delegation authorization")
+    if effect.idempotency_key != effect.action.parameters.get("effect_key"):
+        raise PermissionError("Financial effect identity differs from the canonical action")
+    if current.delegation is None:
+        if current.approval_id is None:
+            raise PermissionError("No central policy decision or exact user escalation approval")
+        row = db.execute("SELECT record FROM approvals WHERE id=?",(current.approval_id,)).fetchone()
+        escalation = Approval.model_validate_json(row[0]) if row else None
+        if escalation is None or escalation.status != "CONSUMED" or escalation.fingerprint != effect.fingerprint or escalation.expires_at <= now_ms():
+            raise PermissionError("Invalid exact escalation approval")
+        db.execute("INSERT INTO approval_uses VALUES (?,?)",(escalation.id,effect.id))
+    elif current.delegation.review_decision != "ALLOW":
+        raise PermissionError("Independent policy decision does not allow execution")
     mandate = read_record(db,"trading_mandates",grant.mandate_id,TradingMandate)
     if (mandate.principal != effect.action.principal or owner is None
             or owner.responsibility_id != mandate.responsibility_id
             or effect.action.responsibility_id != mandate.responsibility_id
+            or effect.action.parameters.get("account_id") != mandate.envelope.account_id
             or mandate.scope_fingerprint != grant.scope_fingerprint
             or mandate.approval_id is None or mandate.approved_envelope is None):
         raise PermissionError("Mandate ownership/fingerprint is invalid")
@@ -318,6 +389,8 @@ def admit_delegation(journal: ActionStore, db: sqlite3.Connection, effect: Effec
         raise PermissionError("Missing canonical financial intent")
     reservation = TradingMissions.reserve_in_transaction(db,risk,effect.id,
         operation=str(intent.get("operation")),pending=intent.get("order_type") != "market")
+    reservation.review_decision,reservation.review_source,reservation.review_reason = grant.review_decision,grant.review_source,grant.review_reason
+    write_record(db,"risk_reservations",reservation)
     effect.mandate_id,effect.reservation_id = mandate.id,reservation.id
 
 
@@ -325,7 +398,8 @@ def validate_delegated_outbound(journal: ActionStore, effect: Effect) -> None:
     with journal.transaction() as db:
         mandate = read_record(db,"trading_mandates",effect.mandate_id or "",TradingMandate)
         reservation = read_record(db,"risk_reservations",effect.reservation_id or "",RiskReservation)
-        if mandate.envelope.mode != "LIVE" or reservation.effect_id != effect.id or reservation.action_fingerprint != effect.fingerprint:
+        if (mandate.envelope.mode != "LIVE" or reservation.effect_id != effect.id or reservation.action_fingerprint != effect.fingerprint
+                or effect.action.parameters.get("account_id") != mandate.envelope.account_id):
             raise PermissionError("Simulation or unbound reservation cannot send a live mutation")
         if reservation.risk_increasing:
             guard = read_record(db,"account_guardrails",reservation.account_id,AccountGuardrails)

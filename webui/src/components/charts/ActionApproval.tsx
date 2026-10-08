@@ -32,8 +32,17 @@ export function ActionApproval({ reference }: { reference: string }) {
     finally { setBusy(false); }
   }
   if (!record) return <p>Invalid approval reference.</p>;
+  const envelope = action?.envelope && typeof action.envelope === "object" && !Array.isArray(action.envelope)
+    ? action.envelope as Record<string, unknown> : null;
   return <section className="my-3 rounded-xl border border-border p-3 text-sm" aria-label="Action approval">
     <p>{status}</p>
+    {envelope && <div className="my-2">
+      <p>Trading mandate · {String(envelope.mode)} · Account {String(envelope.account_id)}</p>
+      <p>Maximum mission loss: {String(envelope.max_mission_loss)} {String(envelope.currency)}</p>
+      <p>Maximum open risk: {String(envelope.max_open_risk)} · Per trade: {String(envelope.max_risk_per_trade)}</p>
+      <p>Expires: {typeof envelope.expires_at === "number" ? new Date(envelope.expires_at).toLocaleString() : "Unavailable"}</p>
+      <p className="text-xs text-muted-foreground">Profit is not guaranteed. Approval grants only the exact limits and finish behaviors below.</p>
+    </div>}
     {action && <details className="my-2"><summary>Action details</summary><pre className="overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(action, null, 2)}</pre></details>}
     {status === "Waiting for approval" && action && <div className="flex gap-3">
       <button disabled={busy} onClick={() => void resolve(true)}>Approve</button>

@@ -10,6 +10,13 @@ const reference = JSON.stringify({ approval_id: id, session_key: "websocket:main
 
 describe("Backend-owned approval", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+  it("shows the final mandate loss envelope from the backend", async () => {
+    mocks.read.mockResolvedValue({ id, status: "PENDING", action: { envelope: { mode: "LIVE", account_id: "broker-account", currency: "USD",
+      max_mission_loss: "100", max_open_risk: "50", max_risk_per_trade: "20", expires_at: 2000000000000 } } });
+    render(<ActionApproval reference={reference} />);
+    expect(await screen.findByText("Maximum mission loss: 100 USD")).toBeVisible();
+    expect(screen.getByText(/Account broker-account/)).toBeVisible();
+  });
   it("shows authoritative action before allowing resolution and ignores model-supplied details", async () => {
     mocks.read.mockResolvedValue({ id, status: "PENDING", action: { volume: "0.10", broker_symbol: "GOLDm" } });
     mocks.resolve.mockResolvedValue({ id, status: "APPROVED" });

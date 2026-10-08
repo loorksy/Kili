@@ -66,6 +66,13 @@ async def test_prior_mandate_executes_once_without_per_trade_approval(tmp_path):
     effect = service.journal.find_effect(preview.effect_key)
     assert effect.mandate_id == mandate.id and effect.approval_id is None
     assert len(service.reservations.list()) == 1
+    reservation = service.reservations.list()[0]
+    assert reservation.review_decision == "ALLOW" and reservation.review_source == "deterministic"
+    assert reservation.mission_budget_after == reservation.mission_budget_before-reservation.risk
+    entry = next(item for item in executor.journal.list() if item.kind == "SUCCEEDED")
+    assert entry.mandate_id == mandate.id and entry.goal_id == mandate.goal_id
+    assert entry.plan_version == 1 and entry.risk_assessment["semantics_version"] == 1
+    assert entry.review_source == "deterministic" and entry.mission_budget_after is not None
     assert "MISSION_SECRET_SENTINEL" not in json.dumps(result)
 
 

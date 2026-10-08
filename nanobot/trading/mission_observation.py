@@ -70,16 +70,35 @@ def explained_change(old: BrokerItem | None, new: BrokerItem | None, effects: li
     return False
 
 
+async def simulated_account(service: TradingMissions, observation: AccountObservation) -> tuple[AccountObservation,list[BrokerDeal],list[BrokerItem]]:
+    from nanobot.trading.simulation import MissionSimulation
+    deals: list[BrokerDeal] = []
+    history: list[BrokerItem] = []
+    # All simulation missions share account exposure, including cancelled
+    # authority whose already-open exposure was deliberately left in place.
+    for peer in service.mandates.list():
+        if peer.envelope.mode != "SIMULATION" or peer.envelope.account_id != service.client.connection.account_id or peer.approved_at is None:
+            continue
+        simulation = MissionSimulation(service,peer)
+        observation,simulated_deals = await simulation.observe(observation)
+        deals.extend(simulated_deals)
+        history.extend(simulation.get().order_history)
+    return observation,deals,history
+
+
 async def refresh(service: TradingMissions, mandate: TradingMandate) -> tuple[TradingMandate,AccountObservation,list[BrokerItem],list[BrokerItem]]:
+    if service.client.connection.account_id != mandate.envelope.account_id:
+        raise PermissionError("Mandate cannot observe or authorize another broker account")
     observation = await service.observe()
     effects = service.journal.list_effects()
     own_effects = [e for e in effects if e.mandate_id == mandate.id]
     start = datetime.fromtimestamp(mandate.approved_at / 1000,timezone.utc).isoformat() if mandate.approved_at else datetime.now(timezone.utc).isoformat()
     deals = await service.client.history_deals(start,datetime.now(timezone.utc).isoformat())
+    history_orders = await service.client.history_orders(start,datetime.now(timezone.utc).isoformat())
     if mandate.envelope.mode == "SIMULATION":
-        from nanobot.trading.simulation import MissionSimulation
-        observation,simulated_deals = await MissionSimulation(service,mandate).observe(observation)
+        observation,simulated_deals,simulated_orders = await simulated_account(service,observation)
         deals = [*deals,*simulated_deals]
+        history_orders = [*history_orders,*simulated_orders]
     positions,orders = owned_items(mandate,effects,observation)
     if mandate.observed:
         previous_owned,_ = owned_items(mandate,effects,mandate.observed)
@@ -99,7 +118,12 @@ async def refresh(service: TradingMissions, mandate: TradingMandate) -> tuple[Tr
                     continue
                 # A broker fill moves an attributed order into an attributed position.
                 filled = old is not None and new is None and kind == "orders" and any(p.client_id == old.client_id and p.client_id for p in positions)
-                if not filled and not explained_change(old,new,effects,mandate.observed.fetched_at,deals):
+                if kind == "positions" and old is None and new is not None:
+                    filled = any(o.client_id and o.client_id == new.client_id and o.symbol == new.symbol and o.volume == new.volume
+                        and ("BUY" in o.type) == ("BUY" in new.type) for o in mandate.observed.orders)
+                ended = old is not None and new is None and kind == "orders" and any(o.id == old.id
+                    and o.state in {"ORDER_STATE_CANCELED","ORDER_STATE_CANCELLED","ORDER_STATE_EXPIRED","ORDER_STATE_REJECTED"} for o in history_orders)
+                if not filled and not ended and not explained_change(old,new,effects,mandate.observed.fetched_at,deals):
                     mandate.status,mandate.attention_reason = "NEEDS_ATTENTION","Manual/unattributed account change; review ownership and risk"
     clients = client_ids(own_effects)
     ids = {p.id for p in [*positions,*orders]} | broker_references(own_effects)
@@ -146,6 +170,9 @@ async def refresh(service: TradingMissions, mandate: TradingMandate) -> tuple[Tr
                 present = any(p.id == effect.provider_reference or p.client_id == payload.get("clientId") and p.client_id for p in [*positions,*orders])
                 if present:
                     reservation.state = "ACTIVE"
+                elif any(o.state in {"ORDER_STATE_CANCELED","ORDER_STATE_CANCELLED","ORDER_STATE_EXPIRED","ORDER_STATE_REJECTED"}
+                        and (o.id == effect.provider_reference or o.client_id and o.client_id == payload.get("clientId")) for o in history_orders):
+                    reservation.state = "RELEASED"
                 elif payload.get("actionType") in {"ORDER_CANCEL","POSITION_CLOSE_ID","POSITION_PARTIAL","POSITION_MODIFY","ORDER_MODIFY"} or any(d.position_id == effect.provider_reference or d.order_id == effect.provider_reference or d.client_id == payload.get("clientId") and d.client_id for d in relevant.values()):
                     reservation.state = "RELEASED"
                 # No evidence of an acknowledged entry retains its reservation.

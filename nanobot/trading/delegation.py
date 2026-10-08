@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from nanobot.security.actions import Action, DelegatedAuthorization
+from nanobot.security.actions import Action, DelegatedAuthorization, now_ms
 from nanobot.trading.metaapi import BrokerPrice, SymbolSpec
 from nanobot.trading.mission_models import TradingMandate
 from nanobot.trading.mission_observation import refresh
 from nanobot.trading.missions import TradingMissions
 from nanobot.trading.proposals import TradeProposals
-from nanobot.trading.risk import assess
+from nanobot.trading.risk import assess, side_of
 
 
 class MandateAuthority:
@@ -25,6 +25,9 @@ class MandateAuthority:
             raise PermissionError("Invalid delegated canonical action")
         mandate: TradingMandate = self.missions.mandates.get(mandate_id)
         self.missions.owner(action.principal,mandate)
+        if (action.parameters.get("account_id") != mandate.envelope.account_id
+                or self.proposals.client.connection.account_id != mandate.envelope.account_id):
+            raise PermissionError("Mandate is bound to another broker account")
         if mandate.approval_id is None or mandate.approved_envelope is None:
             raise PermissionError("Mandate is not user approved")
         if mandate.envelope.mode == "LIVE" and not self.missions.live_enabled:
@@ -33,6 +36,13 @@ class MandateAuthority:
         owner = current_effect_owner()
         if owner is None or owner.responsibility_id != mandate.responsibility_id:
             raise PermissionError("Current responsibility execution does not own the mandate")
+        from nanobot.agent.tools.context import current_request_context
+        context = current_request_context()
+        assert context is not None
+        execution = context.responsibility_scope.executions[mandate.responsibility_id]
+        responsibility = execution.store.assert_owner(execution.claim)
+        if responsibility.state in {"COMPLETED", "FAILED", "CANCELLED", "PAUSED"} or responsibility.recovery_required:
+            raise PermissionError("Responsibility is stopped or requires explicit recovery")
         preview_id = action.parameters.get("preview_id")
         if not isinstance(preview_id,str):
             raise ValueError("Delegated action needs an immutable preview")
@@ -41,6 +51,14 @@ class MandateAuthority:
                 or preview.mandate_fingerprint != mandate.scope_fingerprint):
             raise PermissionError("Preview plan/mandate binding changed")
         mandate,observation,positions,orders = await refresh(self.missions,mandate)
+        if mandate.status in {"ACTIVE", "PAUSED"}:
+            goal = self.missions.goals.get(mandate.goal_id)
+            if now_ms() >= mandate.envelope.expires_at:
+                mandate.status,mandate.finish_kind,mandate.finish_pending = "EXPIRED","expiry",True
+                mandate = self.missions.mandates.save(mandate)
+            elif goal.target_profit is not None and mandate.pnl_complete and mandate.realized_pnl+mandate.unrealized_pnl >= goal.target_profit:
+                mandate.status,mandate.finish_kind,mandate.finish_pending = "TARGET_REACHED","target",True
+                mandate = self.missions.mandates.save(mandate)
         symbols = {preview.broker_symbol} | {p.symbol for p in [*observation.positions,*observation.orders]}
         specs: dict[str,SymbolSpec] = {}
         prices: dict[str,BrokerPrice] = {}
@@ -54,7 +72,7 @@ class MandateAuthority:
             volume = preview.intent.volume or (target.volume if target else None)
             if volume is None:
                 raise ValueError("Broker volume is required for trusted margin calculation")
-            margin = await self.proposals.client.calculate_margin(preview.broker_symbol,preview.intent.side,
+            margin = await self.proposals.client.calculate_margin(preview.broker_symbol,side_of(target) if target else preview.intent.side,
                 volume,preview.intent.price or (target.open_price if target else None) or (p.ask if preview.intent.side == "buy" else p.bid))
         risk = assess(mandate,preview.intent,action.fingerprint,observation,specs,prices,
             preview.broker_symbol,positions,orders,margin)

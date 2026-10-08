@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Literal
 
 from nanobot.security.actions import now_ms
 from nanobot.trading.metaapi import BrokerItem, BrokerPrice, SymbolSpec
@@ -17,7 +18,7 @@ def fresh_price(price: BrokerPrice) -> None:
         raise ValueError("Fresh executable broker pricing is required")
 
 
-def side_of(item: BrokerItem) -> str:
+def side_of(item: BrokerItem) -> Literal["buy", "sell"]:
     parts = item.type.split("_")
     if "BUY" in parts:
         return "buy"
@@ -72,6 +73,10 @@ def assess(mandate: TradingMandate, intent: TradeIntent, fingerprint: str,
     positions, orders = owned_positions, owned_orders
     target = next((p for p in (orders if "order" in intent.operation else positions)
                    if p.id == intent.target_id), None)
+    if intent.operation == "modify_order" and intent.expiration_time is not None:
+        expiry = datetime.fromisoformat(intent.expiration_time.replace("Z","+00:00"))
+        if expiry.tzinfo is None or expiry.timestamp()*1000 > envelope.expires_at:
+            raise PermissionError("Pending modification cannot outlive mandate authority")
     if intent.operation != "open" and (target is None or target.symbol != symbol):
         raise PermissionError("Exact broker target is not owned/supervised by this mission")
     if envelope.supervision_position_id and intent.operation == "open":
@@ -84,6 +89,7 @@ def assess(mandate: TradingMandate, intent: TradeIntent, fingerprint: str,
     risk = Decimal(0)
     previous = Decimal(0)
     amount = Decimal(0)
+    exposure_increasing = False
     if intent.operation == "open":
         if intent.order_type not in envelope.allowed_order_types:
             raise PermissionError("Order type is outside mandate scope")
@@ -132,6 +138,7 @@ def assess(mandate: TradingMandate, intent: TradeIntent, fingerprint: str,
                     raise ValueError("Pending exposure is incomplete")
                 amount = max(Decimal(0), notional(changed.open_price,changed.volume,spec,envelope.currency)
                     - notional(target.open_price,target.volume,spec,envelope.currency))
+                exposure_increasing = changed.volume > target.volume
             if risk > previous and "widen_stop" not in envelope.risk_increase_permissions:
                 raise PermissionError("Increasing protective loss was not authorized")
             if changed.volume and target.volume and changed.volume > target.volume and "add_exposure" not in envelope.risk_increase_permissions:
@@ -143,7 +150,7 @@ def assess(mandate: TradingMandate, intent: TradeIntent, fingerprint: str,
             if remaining and (remaining < spec.min_volume or remaining % spec.volume_step):
                 raise ValueError("Partial close leaves an invalid broker volume")
             risk = previous * remaining / target.volume
-    increasing = intent.operation == "open" or risk > previous or amount > 0
+    increasing = intent.operation == "open" or risk > previous or amount > 0 or exposure_increasing
     if mandate.status == "NEEDS_ATTENTION" and not mandate.finish_pending:
         raise PermissionError("Manual drift or incomplete evidence requires user intervention before mutation")
     if increasing and (mandate.status != "ACTIVE" or not envelope.start_at <= now < envelope.expires_at):

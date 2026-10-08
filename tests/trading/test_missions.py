@@ -63,6 +63,14 @@ async def test_live_feature_is_never_silently_enabled(tmp_path,client):
         await service.activate(goal.principal,mandate.id)
 
 
+async def test_user_denial_cancels_the_exact_draft_authority(tmp_path,client):
+    service,goal,_,mandate,approval = await proposed(tmp_path,client)
+    service.journal.resolve(approval.id,principal=goal.principal,approve=False)
+    assert service.mandates.get(mandate.id).status == "CANCELLED"
+    with pytest.raises(ValueError):
+        await service.activate(goal.principal,mandate.id)
+
+
 def test_required_loss_breach_and_time_boundary():
     for changes in ({"max_mission_loss":None},{"breach_behavior":None},{"expires_at":0},
                     {"max_mission_loss":"Infinity"},{"supervision_position_id":"1"}):

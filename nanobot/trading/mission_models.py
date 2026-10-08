@@ -146,6 +146,8 @@ class TradingMandate(RuntimeRecord):
     pending_event_id: str | None = None
     pending_event_text: str = ""
     pending_event_queued: bool = True
+    last_operational_hash: str | None = None
+    last_notified_pnl: Decimal | None = None
 
 
 class AccountGuardrails(RuntimeRecord):
@@ -172,6 +174,13 @@ class RiskReservation(RuntimeRecord):
     state: Literal["RESERVED", "ACTIVE", "UNCERTAIN", "RELEASED"] = "RESERVED"
     provider_reference: str | None = None
     assessment: dict[str, JsonValue] = Field(default_factory=dict)
+    review_decision: Literal["ALLOW", "ASK_USER", "DENY"] | None = None
+    review_source: Literal["deterministic", "independent", "user"] | None = None
+    review_reason: str = Field(default="",max_length=1000)
+    mission_budget_before: Decimal | None = None
+    mission_budget_after: Decimal | None = None
+    account_budget_before: Decimal | None = None
+    account_budget_after: Decimal | None = None
 
 
 class RiskAssessment(BaseModel):

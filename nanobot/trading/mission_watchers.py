@@ -27,9 +27,17 @@ class MissionWatchers:
         self.policy = policy or ActionPolicy(executor.effects)
 
     def nearest(self) -> int | None:
+        held = {r.mandate_id for r in self.service.reservations.list() if r.state != "RELEASED"}
         return min((min(m.next_check_at,m.envelope.expires_at) if m.status == "ACTIVE" else m.next_check_at
             for m in self.service.mandates.list() if m.approved_at is not None
-            and m.status not in {"CANCELLED","COMPLETED"} and (m.status != "EXPIRED" or m.finish_pending)),default=None)
+            and self.observable(m,held)),default=None)
+
+    @staticmethod
+    def observable(mandate: TradingMandate, held: set[str]) -> bool:
+        if mandate.status in {"CANCELLED","COMPLETED"}:
+            return False
+        return (mandate.status in {"ACTIVE","PAUSED","NEEDS_ATTENTION"}
+            or mandate.finish_pending or mandate.id in held or bool(mandate.pending_pnl_positions))
 
     async def check_limits(self, mandate: TradingMandate, positions: list[BrokerItem], orders: list[BrokerItem]) -> TradingMandate:
         assert mandate.observed is not None
@@ -41,6 +49,10 @@ class MissionWatchers:
             and mandate.daily_pnl.get(today,Decimal(0))+mandate.unrealized_pnl <= -limits.max_daily_loss)
         loss = loss or (limits.max_drawdown is not None and mandate.peak_pnl-total >= limits.max_drawdown)
         guard = self.service.guardrails.get(limits.account_id)
+        if mandate.status == "NEEDS_ATTENTION" and mandate.attention_reason.startswith("Manual/") and not guard.emergency_stop:
+            # A changed broker position may contain exposure the mandate did
+            # not create. Do not apply automatic finish changes to guessed ownership.
+            return self.service.mandates.save(mandate)
         loss = loss or guard.baseline_equity-mandate.observed.account.equity >= guard.max_account_loss
         try:
             exposure = Decimal(0)
@@ -114,10 +126,10 @@ class MissionWatchers:
                     break
 
     async def run_due(self) -> None:
+        held = {r.mandate_id for r in self.service.reservations.list() if r.state != "RELEASED"}
         for mandate in self.service.mandates.list():
-            if (mandate.approved_at is None or mandate.status in {"CANCELLED","COMPLETED"}
-                    or mandate.status == "EXPIRED" and not mandate.finish_pending
-                    or mandate.next_check_at > now_ms() and now_ms() < mandate.envelope.expires_at):
+            due = min(mandate.next_check_at,mandate.envelope.expires_at) if mandate.status == "ACTIVE" else mandate.next_check_at
+            if mandate.approved_at is None or not self.observable(mandate,held) or due > now_ms():
                 continue
             channel,_,chat_id = mandate.principal.partition(":")
             with request_context(RequestContext(channel=channel,chat_id=chat_id,session_key=mandate.principal)):
@@ -128,12 +140,25 @@ class MissionWatchers:
                         await self.finish(mandate,positions,orders)
                     mandate = self.service.mandates.get(mandate.id)
                     # Quotes do not wake the model. Terms/state and ten bounded
-                    # progress/loss buckets do, using durable idempotency receipts.
+                    # progress/loss changes do, using durable idempotency receipts.
                     step = mandate.envelope.max_mission_loss/10
-                    bucket = int((mandate.realized_pnl+mandate.unrealized_pnl)//step)
+                    pnl = mandate.realized_pnl+mandate.unrealized_pnl
                     terms = [(p.id,p.type,str(p.volume),str(p.stop_loss),str(p.take_profit)) for p in [*positions,*orders]]
-                    event = hashlib.sha256(repr((mandate.status,mandate.attention_reason,bucket,terms)).encode()).hexdigest()
-                    mandate = self.notify(mandate,event)
+                    operational = hashlib.sha256(repr((mandate.status,mandate.attention_reason,terms)).encode()).hexdigest()
+                    changed = mandate.last_notified_pnl is None or abs(pnl-mandate.last_notified_pnl) >= step
+                    if operational != mandate.last_operational_hash or changed:
+                        event = hashlib.sha256(repr((operational,str(pnl))).encode()).hexdigest()
+                        behavior = {"target":mandate.envelope.target_behavior,"expiry":mandate.envelope.expiry_behavior,
+                            "breach":mandate.envelope.breach_behavior,"emergency":mandate.envelope.emergency_behavior}.get(mandate.finish_kind or "")
+                        if mandate.status in {"TARGET_REACHED","EXPIRED","RISK_STOPPED"} and behavior is not None and not behavior.notify:
+                            mandate.last_operational_hash,mandate.last_notified_pnl,mandate.last_event_hash = operational,pnl,event
+                            mandate.pending_event_queued = True
+                            mandate = self.service.mandates.save(mandate)
+                            self.service.audit(mandate,"MISSION_"+mandate.status)
+                        else:
+                            mandate = self.notify(mandate,event,operational_hash=operational,pnl=pnl)
+                    elif not mandate.pending_event_queued:
+                        mandate = self.notify(mandate,mandate.last_event_hash or "initial")
                     mandate.failure_count = 0
                     self.service.mandates.save(mandate)
                 except (ValueError,PermissionError,ProviderUnavailableError,ProviderRejectedError):
@@ -144,13 +169,18 @@ class MissionWatchers:
                     current = self.service.mandates.save(current)
                     self.notify(current,"unavailable:"+current.attention_reason)
 
-    def notify(self, mandate: TradingMandate, event: str) -> TradingMandate:
+    def notify(self, mandate: TradingMandate, event: str, *, operational_hash: str | None = None,
+               pnl: Decimal | None = None) -> TradingMandate:
         pending_id = mandate.pending_event_id
         if pending_id and not mandate.pending_event_queued:
             self.responsibilities.enqueue(mandate.responsibility_id,pending_id,mandate.pending_event_text)
             mandate.pending_event_queued = True
             mandate = self.service.mandates.save(mandate)
         if event != mandate.last_event_hash:
+            if operational_hash is not None:
+                mandate.last_operational_hash = operational_hash
+            if pnl is not None:
+                mandate.last_notified_pnl = pnl
             mandate.event_generation += 1
             identity = f"mission:{mandate.id}:{mandate.event_generation}"
             mandate.pending_event_id = identity
@@ -159,6 +189,7 @@ class MissionWatchers:
                 f"target is aspirational. {mandate.attention_reason}")
             mandate.pending_event_queued,mandate.last_event_hash = False,event
             mandate = self.service.mandates.save(mandate)  # durable outbox before enqueue
+            self.service.audit(mandate,"MISSION_"+mandate.status)
             self.responsibilities.enqueue(mandate.responsibility_id,identity,mandate.pending_event_text)
             mandate.pending_event_queued = True
             mandate = self.service.mandates.save(mandate)

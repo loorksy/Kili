@@ -54,6 +54,8 @@ async def control_mission(service: TradingMissions, request: MissionControl) -> 
         if guard is None or guard.id != mandate.envelope.account_id:
             raise PermissionError("Guardrail account differs from this mandate")
         previous = service.guardrails.get(guard.id)
+        if guard.enabled and guard.id != service.client.connection.account_id:
+            raise PermissionError("Cannot enable guardrails for a replaced account connection")
         if guard.enabled and mandate.envelope.mode == "LIVE" and not service.live_enabled:
             raise PermissionError("Live delegated trading is disabled in Settings")
         if guard.baseline_equity != previous.baseline_equity:

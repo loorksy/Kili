@@ -53,6 +53,17 @@ def integration_status(config: Config) -> dict[str, object]:
 def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdate) -> dict[str, object]:
     def change(config: Config) -> None:
         previous = getattr(config.tools.integrations, request.provider)
+        if request.provider == "metaapi" and isinstance(previous,Connection) and previous.account_id != request.account_id:
+            from nanobot.session.records import RecordStore
+            from nanobot.trading.mission_models import AccountGuardrails
+            guards = RecordStore("account_guardrails",AccountGuardrails)
+            try:
+                old_guard = guards.get(previous.account_id)
+            except ValueError:
+                pass
+            else:
+                old_guard.enabled = False
+                guards.save(old_guard)
         reference = previous.secret_ref if isinstance(previous, Connection) else "connection_" + uuid.uuid4().hex
         connection = Connection(secret_ref=reference, account_id=request.account_id,
                                 environment=request.environment, region=request.region)

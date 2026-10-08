@@ -40,6 +40,12 @@ class TradeJournalEntry(RuntimeRecord):
     plan_version: int | None = None
     mission_pnl: str | None = None
     risk_assessment: dict[str, JsonValue] = Field(default_factory=dict)
+    review_decision: str | None = None
+    review_source: str | None = None
+    mission_budget_before: str | None = None
+    mission_budget_after: str | None = None
+    account_budget_before: str | None = None
+    account_budget_after: str | None = None
 
 
 def current_effect_owner() -> EffectOwner | None:
@@ -86,7 +92,13 @@ class TradeExecutor:
             risk_reservation_id=effect.reservation_id if effect else None,autonomous=bool(effect and effect.mandate_id),
             plan_version=self.authority.missions.plans.get(preview.plan_id).plan_version if preview.plan_id else None,
             mission_pnl=str(mandate.realized_pnl+mandate.unrealized_pnl) if mandate else None,
-            risk_assessment=reservation.assessment if reservation else {}))
+            risk_assessment=reservation.assessment if reservation else {},
+            review_decision=reservation.review_decision if reservation else None,
+            review_source=reservation.review_source if reservation else None,
+            mission_budget_before=str(reservation.mission_budget_before) if reservation and reservation.mission_budget_before is not None else None,
+            mission_budget_after=str(reservation.mission_budget_after) if reservation and reservation.mission_budget_after is not None else None,
+            account_budget_before=str(reservation.account_budget_before) if reservation and reservation.account_budget_before is not None else None,
+            account_budget_after=str(reservation.account_budget_after) if reservation and reservation.account_budget_after is not None else None))
 
     @staticmethod
     def public_effect(effect: Effect) -> dict[str, JsonValue]:
@@ -115,6 +127,11 @@ class TradeExecutor:
         self.proposals.require_preview(preview_id,principal)  # No replaced preview during remote validation.
         owner = current_effect_owner()
         delegated = await self.authority.evaluate(authorization.action) if preview.mandate_id else None
+        if delegated is not None:
+            reviewed = authorization.delegation
+            delegated = delegated.model_copy(update={"review_decision":reviewed.review_decision if reviewed else "ASK_USER",
+                "review_source":reviewed.review_source if reviewed else "user",
+                "review_reason":reviewed.review_reason if reviewed else "Exact per-action user approval after escalation"})
         effect = self.effects.start_effect(effect.id,approval_id=authorization.approval_id,owner=owner,delegation=delegated)
         self.record(preview,"STARTED",effect)
         state: Literal["SUCCEEDED","FAILED","UNCERTAIN"] = "UNCERTAIN"

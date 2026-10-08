@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from nanobot.security.runtime_storage import internal_state_root
 
@@ -95,6 +95,9 @@ class DelegatedAuthorization(BaseModel):
     scope_fingerprint: str
     risk: dict[str, JsonValue]
     review_context: dict[str, JsonValue]
+    review_decision: Literal["ALLOW", "ASK_USER", "DENY"] = "ALLOW"
+    review_source: Literal["deterministic", "independent", "user"] = "deterministic"
+    review_reason: str = Field(default="",max_length=1000)
 
 
 class ActionAuthority(Protocol):
@@ -201,6 +204,9 @@ class ActionStore:
             record.status = "APPROVED" if approve else "DENIED"
             record.resolved_at, record.resolved_by = now_ms(), principal
             db.execute("UPDATE approvals SET record=? WHERE id=?", (record.model_dump_json(), record.id))
+            if not approve and record.action.tool == "trading_mandate":
+                from nanobot.trading.missions import reject_mandate_approval
+                reject_mandate_approval(db,record)
             return record
 
     def pending_resolutions(self) -> list[Approval]:
@@ -421,7 +427,9 @@ class ActionPolicy:
                 if review.decision == "DENY":
                     return review.reason or "Independent review denied the action"
                 if review.decision == "ALLOW":
-                    _POLICY_DELEGATION.set(delegated)
+                    _POLICY_DELEGATION.set(delegated.model_copy(update={"review_decision":"ALLOW",
+                        "review_source":"independent" if self.reviewer else "deterministic",
+                        "review_reason":review.reason[:1000]}))
                     return None
                 delegated_review = review
                 # Escalation retains exact per-action approval, but the executor

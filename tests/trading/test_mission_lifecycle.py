@@ -70,6 +70,74 @@ async def test_simulation_cannot_reach_broker_and_reopens_persistent_book(tmp_pa
     assert not state["calls"]
 
 
+@pytest.mark.parametrize("event",["fill","expiry"])
+async def test_pending_entry_after_restart_uses_exact_history_without_manual_drift(tmp_path,event):
+    from datetime import datetime, timedelta, timezone
+
+    from nanobot.trading.missions import TradingMissions
+    from nanobot.trading.simulation import MissionSimulation
+    service,mandate,executor,registry,context,state = await delegated_setup(tmp_path,mode="SIMULATION")
+    with request_context(context):
+        preview = await preview_for(executor,mandate,order_type="limit",price=Decimal(2700))
+        assert json.loads(await registry.execute("trade_execute",{"preview_id":preview.id}))["state"] == "SUCCEEDED"
+    current,_,_,orders = await refresh(service,service.mandates.get(mandate.id))
+    assert len(orders) == 1
+    restarted = TradingMissions(service.client,service.journal)
+    if event == "fill":
+        state["bid"],state["ask"] = "2699.5","2700"
+    else:
+        simulation = MissionSimulation(restarted,current)
+        book = simulation.get()
+        book.orders[0].expiration_time = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+        simulation.records.save(book)
+    current,_,positions,orders = await refresh(restarted,restarted.mandates.get(mandate.id))
+    assert current.status == "ACTIVE" and not orders and not state["calls"]
+    assert len(positions) == (1 if event == "fill" else 0)
+    assert restarted.reservations.list()[0].state == ("ACTIVE" if event == "fill" else "RELEASED")
+
+
+async def test_profit_boundary_jitter_does_not_poll_the_model(tmp_path):
+    service,mandate,executor,registry,context,state = await delegated_setup(tmp_path)
+    with request_context(context):
+        preview = await preview_for(executor,mandate)
+        assert json.loads(await registry.execute("trade_execute",{"preview_id":preview.id}))["state"] == "SUCCEEDED"
+    store = next(iter(context.responsibility_scope.executions.values())).store
+    watcher = MissionWatchers(executor,store)
+    count = None
+    for profit in ("10.1","9.9","10.2","9.8"):
+        state["positions"][0]["profit"] = profit
+        current = service.mandates.get(mandate.id)
+        current.next_check_at = 0
+        service.mandates.save(current)
+        await watcher.run_due()
+        wakes = len(store.get(mandate.responsibility_id).wakes)
+        if count is None:
+            count = wakes
+        assert wakes == count
+
+
+async def test_signed_silent_finish_does_not_create_a_model_notification(tmp_path):
+    from nanobot.trading.mission_models import FinishBehavior
+    service,mandate,executor,registry,context,state = await delegated_setup(tmp_path,
+        target_behavior=FinishBehavior(cancel_pending=True,close_positions=True,notify=False))
+    with request_context(context):
+        preview = await preview_for(executor,mandate)
+        assert json.loads(await registry.execute("trade_execute",{"preview_id":preview.id}))["state"] == "SUCCEEDED"
+    state["positions"][0]["profit"] = "340"
+    current = service.mandates.get(mandate.id)
+    current.next_check_at = 0
+    service.mandates.save(current)
+    store = next(iter(context.responsibility_scope.executions.values())).store
+    await MissionWatchers(executor,store).run_due()
+    assert service.mandates.get(mandate.id).status == "TARGET_REACHED" and not state["positions"]
+    assert not any(key.startswith("mission:") for key in store.get(mandate.responsibility_id).wakes)
+    current = service.mandates.get(mandate.id)
+    current.next_check_at = 0
+    service.mandates.save(current)
+    await MissionWatchers(executor,store).run_due()
+    assert not any(key.startswith("mission:") for key in store.get(mandate.responsibility_id).wakes)
+
+
 @pytest.mark.parametrize("event",["target","loss","expiry","emergency"])
 async def test_lifecycle_performs_only_the_user_approved_finish_behavior(tmp_path,event):
     service,mandate,executor,registry,context,state = await delegated_setup(tmp_path,mode="SIMULATION",max_open_risk="500")

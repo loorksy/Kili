@@ -12,7 +12,7 @@ from nanobot.trading.metaapi import MetaApiClient
 def broker_fixture(tmp_path):
     secrets = SecretStore(tmp_path/"mission-secrets")
     secrets.put("testmeta","MISSION_SECRET_SENTINEL")
-    state = {"positions":[],"orders":[],"deals":[],"calls":[],"equity":"10000",
+    state = {"positions":[],"orders":[],"history_orders":[],"deals":[],"calls":[],"equity":"10000",
              "bid":"2700","ask":"2701","connected":True,"margin_mode":"ACCOUNT_MARGIN_MODE_RETAIL_HEDGING"}
     def handler(request):
         path = request.url.path
@@ -33,6 +33,8 @@ def broker_fixture(tmp_path):
             collection = state["orders" if "orderId" in payload else "positions"]
             item = next(p for p in collection if p["id"] == target)
             if payload["actionType"] in {"POSITION_CLOSE_ID","ORDER_CANCEL"}:
+                if payload["actionType"] == "ORDER_CANCEL":
+                    state["history_orders"].append({**item,"state":"ORDER_STATE_CANCELED"})
                 if payload["actionType"] == "POSITION_CLOSE_ID":
                     state["deals"].append({"id":"deal-"+identity,"positionId":item["id"],"clientId":item.get("clientId"),
                         "type":"DEAL_TYPE_SELL","entryType":"DEAL_ENTRY_OUT","profit":item["profit"],"time":datetime.now(timezone.utc).isoformat()})
@@ -47,6 +49,8 @@ def broker_fixture(tmp_path):
         if path.endswith("account-information"):
             return httpx.Response(200,json={"broker":"fixture","platform":"mt5","currency":"USD","balance":"10000","equity":state["equity"],
                 "margin":"0","freeMargin":"10000","tradeAllowed":True,"marginMode":state["margin_mode"]})
+        if "/history-orders/" in path:
+            return httpx.Response(200,json=state["history_orders"])
         for kind in ("positions","orders","deals"):
             if path.endswith("/"+kind) or "/history-"+kind+"/" in path:
                 return httpx.Response(200,json=state[kind])

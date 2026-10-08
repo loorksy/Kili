@@ -18,6 +18,7 @@ from nanobot.trading.risk import side_of
 class SimulationBook(RuntimeRecord):
     positions: list[BrokerItem] = Field(default_factory=list,max_length=100)
     orders: list[BrokerItem] = Field(default_factory=list,max_length=100)
+    order_history: list[BrokerItem] = Field(default_factory=list,max_length=10000)
     deals: list[BrokerDeal] = Field(default_factory=list,max_length=10000)
     receipts: dict[str,TradeResponse] = Field(default_factory=dict,max_length=10000)
 
@@ -77,6 +78,7 @@ class MissionSimulation:
             if intent.operation == "close_position":
                 await self.close(book,target,intent.volume)
             elif intent.operation == "cancel_order":
+                book.order_history.append(target.model_copy(update={"state":"ORDER_STATE_CANCELED"}))
                 book.orders.remove(target)
             else:
                 if intent.stop_loss is not None:
@@ -96,6 +98,7 @@ class MissionSimulation:
         book = self.get()
         for order in list(book.orders):
             if order.expiration_time and datetime.fromisoformat(order.expiration_time.replace("Z","+00:00")) <= datetime.now(timezone.utc):
+                book.order_history.append(order.model_copy(update={"state":"ORDER_STATE_EXPIRED"}))
                 book.orders.remove(order)
                 continue
             price = await self.service.client.price(order.symbol)
@@ -105,6 +108,7 @@ class MissionSimulation:
             quote = price.ask if side == "buy" else price.bid
             hit = quote <= order.open_price if side == "buy" and order.type.endswith("LIMIT") or side == "sell" and order.type.endswith("STOP") else quote >= order.open_price
             if hit:
+                book.order_history.append(order.model_copy(update={"state":"ORDER_STATE_FILLED"}))
                 book.orders.remove(order)
                 order.type = "POSITION_TYPE_"+side.upper()
                 order.open_price = quote
@@ -120,8 +124,15 @@ class MissionSimulation:
         book = self.records.save(book)
         realized = sum((d.profit+d.swap+d.commission for d in book.deals),Decimal(0))
         unrealized = sum((p.profit or Decimal(0) for p in book.positions),Decimal(0))
+        margin = Decimal(0)
+        for item in [*book.positions,*book.orders]:
+            if item.volume is None or item.open_price is None:
+                raise ValueError("Simulation exposure cannot estimate margin")
+            margin += await self.service.client.calculate_margin(item.symbol,side_of(item),item.volume,item.open_price)
         observation.account.balance += realized
         observation.account.equity += realized+unrealized
+        observation.account.margin += margin
+        observation.account.free_margin = observation.account.equity-observation.account.margin
         observation.positions.extend(book.positions)
         observation.orders.extend(book.orders)
         return observation,book.deals
