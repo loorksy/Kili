@@ -8,7 +8,8 @@ const recentActions = new WeakMap<HTMLElement, CustomEvent>();
 
 export interface DrawingEdit { id?: string; object_revision?: number; name: string; points: { timestamp: number; value: string }[] }
 export interface ChartInteraction { selectedTool?: string; onDrawing?: (drawing: DrawingEdit) => void; onCrosshair?: (point?: { timestamp: number; value: string; pane: string }) => void }
-export function mountCloudChart(container: HTMLElement, state: CloudChartState, datafeed: Datafeed, interaction: ChartInteraction = {}): () => void {
+export type ChartMount = (() => void) & { viewport?: () => { count: number; before: string } | undefined };
+export function mountCloudChart(container: HTMLElement, state: CloudChartState, datafeed: Datafeed, interaction: ChartInteraction = {}): ChartMount {
   const calendar: Record<string, [number, string]> = { D: [1, "day"], W: [1, "week"], M: [1, "month"] };
   const unit = /^([SMH])(\d+)$/.exec(state.timeframe);
   const units: Record<string, string> = { S: "second", M: "minute", H: "hour" };
@@ -114,7 +115,7 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
   window.addEventListener("nanobot-cloud-chart-updated", replay);
   const recent = recentActions.get(container);
   if (recent) window.setTimeout(() => { if (!disposed) replay(recent); }, 100);
-  return () => {
+  const dispose = () => {
     window.removeEventListener("nanobot-cloud-chart-updated", replay);
     if (hideTimer) clearTimeout(hideTimer);
     disposed = true;
@@ -124,4 +125,14 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     pro.destroy();
     container.replaceChildren();
   };
+  return Object.assign(dispose, { viewport: () => {
+    const core = getCore();
+    if (!core) return undefined;
+    const data = core.getDataList();
+    const range = core.getVisibleRange();
+    const first = Math.max(0, Math.floor(range.from));
+    const last = Math.min(data.length - 1, Math.ceil(range.to) - 1);
+    if (last <= first || !data[last]) return undefined;
+    return { count: Math.min(5000, last - first + 1), before: new Date(data[last].timestamp + 1).toISOString() };
+  } });
 }

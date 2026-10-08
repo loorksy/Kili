@@ -3,7 +3,7 @@ import type { Datafeed } from "@klinecharts/pro";
 import { useClient } from "@/providers/ClientProvider";
 import { fetchCloudChart, fetchChartCandles, updateCloudChart } from "@/lib/api";
 import { parseChartReference, type CloudChartState } from "./contract";
-import { mountCloudChart } from "./pro-adapter";
+import { mountCloudChart, type ChartMount } from "./pro-adapter";
 
 export function CloudChart({ reference }: { reference: string }) {
   const parsed = parseChartReference(reference);
@@ -14,6 +14,7 @@ export function CloudChart({ reference }: { reference: string }) {
   const [error, setError] = useState("");
   const [drawingTool, setDrawingTool] = useState("");
   const [price, setPrice] = useState("");
+  const mountedChart = useRef<ChartMount | null>(null);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!chartId || !sessionKey) return;
@@ -70,7 +71,8 @@ export function CloudChart({ reference }: { reference: string }) {
         .then(updated => { if (!closed) { setDrawingTool(""); setChart(updated); setError(""); } })
         .catch(() => { if (!closed) setError("Drawing changed. Reopen the chart before editing."); });
     } });
-    return () => { closed = true; stopFeed(); destroy(); };
+    mountedChart.current = destroy;
+    return () => { closed = true; stopFeed(); destroy(); if (mountedChart.current === destroy) mountedChart.current = null; };
   }, [chart, chartId, sessionKey, token, drawingTool, client]);
   async function change(operation: Record<string, unknown>) {
     if (!chart || !sessionKey) return;
@@ -97,6 +99,7 @@ export function CloudChart({ reference }: { reference: string }) {
     {error && <p className="p-2 text-xs text-destructive" role="status">{error}</p>}
     <div ref={container} className="h-[360px] w-full min-w-0 sm:h-[440px]" />
     <div className="flex flex-wrap gap-2 p-2 text-xs">
+      <button disabled={!chart} onClick={() => { const view = mountedChart.current?.viewport?.(); if (view) void change({ operation: "load_history", history_count: view.count, history_before: view.before }); else setError("Chart data is still loading."); }}>Save view</button>
       <input aria-label="Annotation price" className="w-28 rounded border bg-background px-2" value={price} onChange={e => setPrice(e.target.value)} placeholder="Price" />
       <button disabled={!chart || !/^[0-9]+(?:\.[0-9]+)?$/.test(price)} onClick={() => void change({ operation: "add_annotation", annotation_type: "horizontal_line", points: [{ value: price }], text: "User price level" })}>Save price level</button>
       {chart?.annotations.map(a => <span key={a.id} className="text-muted-foreground" title={`${a.origin ?? "NANOBOT"} · ${new Date(a.updated_at).toLocaleString()}`}>{a.text || a.type}{["USER", "IMPORT"].includes(a.origin ?? "") && <label className="ml-1"><input type="checkbox" checked={a.agent_editable ?? false} aria-label={`Allow Nanobot to edit ${a.text || a.type}`} onChange={e => void change({ operation: "configure_annotation", annotation_id: a.id, object_revision: a.revision, agent_editable: e.target.checked })} /> Agent edits</label>}</span>)}

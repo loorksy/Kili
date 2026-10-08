@@ -4,7 +4,7 @@ import type { CloudChartState } from "@/components/charts/contract";
 import type { Datafeed } from "@klinecharts/pro";
 
 const mocks = vi.hoisted(() => ({ core: { getSize: vi.fn(() => ({ width: 800 })), scrollByDistance: vi.fn(), scrollToTimestamp: vi.fn(), setOffsetRightDistance: vi.fn(), setBarSpace: vi.fn(),
-  subscribeAction: vi.fn(), unsubscribeAction: vi.fn(), convertFromPixel: vi.fn(() => [{ timestamp: 1000, value: 2700 }]), createOverlay: vi.fn(), createIndicator: vi.fn(), getDataList: vi.fn(() => [{ timestamp: 1000 }]),
+  subscribeAction: vi.fn(), unsubscribeAction: vi.fn(), convertFromPixel: vi.fn(() => [{ timestamp: 1000, value: 2700 }]), createOverlay: vi.fn(), createIndicator: vi.fn(), getVisibleRange: vi.fn(() => ({ from: 0, to: 2 })), getDataList: vi.fn(() => [{ timestamp: 1000 }, { timestamp: 2000 }]),
   convertToPixel: vi.fn(() => ({ x: 50, y: 80 })) }, destroy: vi.fn(), register: vi.fn() }));
 vi.mock("@klinecharts/pro", () => ({ KLineChartPro: class {
   constructor(options: { container: HTMLElement }) {
@@ -26,6 +26,7 @@ describe("Chart semantic adapter", () => {
     const stop = mountCloudChart(container, state, feed);
     vi.runOnlyPendingTimers();
     expect(mocks.core.setOffsetRightDistance).toHaveBeenCalledWith(40);
+    expect(stop.viewport?.()).toEqual({ count: 2, before: "1970-01-01T00:00:02.001Z" });
     window.dispatchEvent(new CustomEvent("nanobot-cloud-chart-updated", { detail: {
       chart_id: state.id, operation: "add_annotation", occurred_at: Date.now(), anchors: [[1000, "2700.10"], [2000, "2710.20"]] } }));
     vi.advanceTimersByTime(200);
