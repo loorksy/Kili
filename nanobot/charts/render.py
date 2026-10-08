@@ -5,8 +5,9 @@ import io
 from bisect import bisect_left
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from nanobot.charts.controller import candle_time
 from nanobot.charts.scene import ChartScene
@@ -17,6 +18,9 @@ def render_scene(scene: ChartScene, width: int = 1000, height: int = 640) -> byt
         raise ValueError("Chart image dimensions outside bounded limits")
     image = Image.new("RGB", (width, height), "#0f172a")
     draw = ImageDraw.Draw(image)
+    # Ship the font so deployment does not depend on host fonts. Pillow's RAQM
+    # layout shapes Arabic and resolves mixed RTL/LTR labels when available.
+    draw.font = ImageFont.truetype(str(Path(__file__).parent / "assets" / "DejaVuSans.ttf"), 13)
     draw.text((20, 12), f"{scene.chart.canonical_instrument} / {scene.chart.timeframe} / OANDA", fill="white")
     data = scene.candles
     if not data:

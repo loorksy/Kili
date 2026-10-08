@@ -55,7 +55,7 @@ def capture_message_deliveries() -> Generator[set[tuple[str, str]], None, None]:
             StringSchema(""),
             description=(
                 "Optional list of existing file paths to attach. "
-                "Use artifact paths returned by generate_image here when delivering generated images."
+                "Use artifact paths returned by generate_image or chart_snapshot(format=attachment) here when delivering images."
             ),
         ),
         buttons=ArraySchema(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from typing import Any, Literal
 
@@ -13,13 +14,14 @@ from nanobot.agent.tools.context import ToolContext
 from nanobot.charts.render import render_scene
 from nanobot.charts.scene import build_scene
 from nanobot.charts.state import ChartService
+from nanobot.utils.artifacts import generated_image_tool_result, store_generated_image_artifact
 from nanobot.utils.helpers import build_image_content_blocks
 
 
 class SnapshotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     chart_id: str
-    format: Literal["structured", "image"] = "structured"
+    format: Literal["structured", "image", "attachment"] = "structured"
     width: int = Field(default=1000, ge=320, le=1600)
     height: int = Field(default=640, ge=240, le=1200)
 
@@ -37,7 +39,7 @@ class ChartSnapshotTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Inspect the current cloud chart scene and exact metadata. Use format=image only with an image-capable model; structured works with all models. Renders only cached chart data, drawings and indicators, with no browser. Complex curves use labeled anchor previews; exact prices come from inspect_candle."
+        return "Inspect or export the current cloud chart. When the user asks for a chart picture, use format=attachment: it saves a PNG and returns artifact paths; call message with those paths in media to actually send the picture. This works without a vision model or image-generation provider. Use format=image for internal vision inspection only, or structured for exact metadata. Renders cached chart data, drawings and indicators without a browser; complex curves use labeled anchor previews."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -59,4 +61,12 @@ class ChartSnapshotTool(Tool):
         if request.format == "structured":
             return scene.model_dump_json()
         raw = await asyncio.to_thread(render_scene, scene, request.width, request.height)
+        if request.format == "attachment":
+            artifact = await asyncio.to_thread(
+                store_generated_image_artifact,
+                "data:image/png;base64," + base64.b64encode(raw).decode("ascii"),
+                prompt=f"Chart snapshot: {chart.canonical_instrument} / {chart.timeframe}; chart {chart.id}; revision {chart.revision}",
+                model="chart-rasterizer", provider="nanobot", save_dir="charts",
+            )
+            return generated_image_tool_result([artifact])
         return build_image_content_blocks(raw, "image/png", "", json.dumps(scene.metadata()))

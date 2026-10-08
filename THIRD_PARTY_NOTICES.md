@@ -424,3 +424,10 @@ The existing build-time chart adapter also transforms only the KLineChart
 This enables bounded semantic viewport counts without changing default spacing
 or modifying installed files. The transformation rejects a different upstream
 source hash. See `docs/cloud-chart-workstation.md` for the exact pin and delta.
+
+## Chart export font
+
+Chart PNG exports bundle the unmodified DejaVu Sans font. Bitstream Vera
+copyright (c) 2003 Bitstream, Inc.; DejaVu changes are public domain. The
+font redistribution license is included in
+`nanobot/charts/assets/DejaVuSans-LICENSE.txt`.
