@@ -39,3 +39,11 @@ The SDK has a service-use license, not MIT. See `THIRD_PARTY_NOTICES.md`.
 Deterministic tests cover reuse, account isolation, exposed mutation methods,
 precision, token reflection, filtered environment, subprocess death, absence
 of retries and unauthorized mutation denial. No test places a real trade.
+
+Live quotes use a shared SDK streaming connection per account while consumers
+need it. The pinned public SynchronizationListener emits bounded price frames;
+private IPC demultiplexes these independently of RPC responses. Consumers
+coalesce newest-per-symbol events and release subscriptions on close. Historical
+candles use the SDK historical API, not midpoint synthesis. After synchronization
+and again immediately before the queued outbound write, the original execution
+scope must still own the STARTED effect. A stale worker cannot send a trade.

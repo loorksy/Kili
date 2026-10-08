@@ -264,15 +264,18 @@ class MetaApiClient:
                 # Account synchronization may wait. Fence again after it,
                 # immediately before handing the mutation to the SDK.
                 await bridge.request("prepare_trade")
-                latest = journal.get_effect(effect.id)
-                if (latest.token != effect.token or latest.generation != effect.generation
-                        or latest.state != "STARTED"):
-                    raise PermissionError("SDK effect ownership changed during synchronization")
-                journal.validate_effect_owner(latest)
-                if latest.mandate_id:
-                    from nanobot.trading.missions import validate_delegated_outbound
-                    validate_delegated_outbound(journal, latest)
-                return parse_provider(TradeResponse, await bridge.request("trade", payload))
+                def fence() -> None:
+                    latest = journal.get_effect(effect.id)
+                    if (latest.token != effect.token or latest.generation != effect.generation
+                            or latest.state != "STARTED"):
+                        raise PermissionError("SDK effect ownership changed during synchronization")
+                    journal.validate_effect_owner(latest)
+                    if latest.mandate_id:
+                        from nanobot.trading.missions import validate_delegated_outbound
+                        validate_delegated_outbound(journal, latest)
+                # Recheck inside the connector lock, immediately before stdin
+                # delivery, including time spent waiting behind other reads.
+                return parse_provider(TradeResponse, await bridge.request("trade", payload, before_write=fence))
             except SDKRejectedError:
                 raise ProviderRejectedError("MetaApi rejected the exact authorized trade") from None
         # Numeric JSON is encoded from validated decimal strings without float conversion.

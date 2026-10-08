@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from nanobot.market.models import Connection
-from nanobot.market.oanda import ProviderUnavailableError
+from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.secrets import SecretStore
 from nanobot.trading.metaapi import MetaApiClient, ProviderRejectedError
 from nanobot.trading.sdk_bridge import (
@@ -191,7 +191,9 @@ async def test_sdk_mutation_refences_after_account_synchronization(client, tmp_p
                 client.transport = None
         raise AssertionError("No HTTP financial mutation allowed")
 
-    async def sdk_request(operation, parameters=None):
+    async def sdk_request(operation, parameters=None, *, before_write=None):
+        if before_write:
+            before_write()
         calls.append(operation)
         if operation == "prepare_trade":
             effect = executor.effects.find_effect(preview.effect_key)
@@ -219,3 +221,97 @@ def test_missing_mapping_error_is_actionable(client, tmp_path):
     mappings = InstrumentMappings(RecordStore("mappings", SymbolMapping, ActionStore(tmp_path / "state.db")))
     with pytest.raises(ValueError, match="verify the exact broker symbol"):
         mappings.require(client.connection.account_id, "XAU-USD")
+
+
+async def test_price_events_are_demultiplexed_from_rpc_and_preserve_other_symbols(monkeypatch, tmp_path):
+    secrets = SecretStore(tmp_path / "secrets")
+    secrets.put("meta", "TOKEN_SENTINEL")
+    bridge = SDKBridge(Connection(secret_ref="meta", account_id="demo"), secrets)
+    script = '''import sys,json
+sys.stdin.readline()
+for line in sys.stdin:
+    request=json.loads(line)
+    if request['operation']=='subscribe' and request['parameters']['symbols']:
+        print(json.dumps({'kind':'prices','ok':True,'prices':[{'symbol':'GOLDm','bid':'2700','ask':'2701'}]}),flush=True)
+        print(json.dumps({'kind':'prices','ok':True,'prices':[{'symbol':'EURUSD.a','bid':'1.1','ask':'1.2'}]}),flush=True)
+    print(json.dumps({'ok':True,'data':['TOKEN_SENTINEL'] if request['operation']=='symbols' else {'ready':True}}),flush=True)
+'''
+    process = await asyncio.create_subprocess_exec(sys.executable, "-I", "-c", script,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    bridge._process = process
+    process.stdin.write(b'{}\n')
+    await process.stdin.drain()
+    monkeypatch.setattr(bridge, "_start", AsyncMock(return_value=process))
+    stream = bridge.stream_quotes({"GOLDm", "EURUSD.a"})
+    try:
+        first = await asyncio.wait_for(anext(stream), 1)
+        second = await asyncio.wait_for(anext(stream), 1)
+        assert {first["symbol"], second["symbol"]} == {"GOLDm", "EURUSD.a"}
+        assert await bridge.request("symbols") == ["[redacted]"]
+        assert len(bridge._consumers) == 1
+    finally:
+        await stream.aclose()
+        await bridge.close()
+    assert bridge._consumers == {} and process.returncode is not None
+
+
+async def test_sdk_stream_subscription_is_account_shared_and_uses_public_listener(monkeypatch):
+    stream = SimpleNamespace(add_synchronization_listener=lambda listener: listeners.append(listener),
+        connect=AsyncMock(), wait_synchronized=AsyncMock(), subscribe_to_market_data=AsyncMock(),
+        unsubscribe_from_market_data=AsyncMock(), close=AsyncMock())
+    listeners, events = [], []
+    account = SimpleNamespace(get_streaming_connection=lambda: stream)
+    api = SimpleNamespace(metatrader_account_api=SimpleNamespace(get_account=AsyncMock(return_value=account)))
+    monkeypatch.setitem(sys.modules, "metaapi_cloud_sdk", SimpleNamespace(MetaApi=lambda *_: api, SynchronizationListener=object))
+    monkeypatch.setitem(sys.modules, "metaapi_cloud_sdk.clients.metaapi.synchronization_listener", SimpleNamespace(SynchronizationListener=object))
+    environment = AccountEnvironment({"token": "SENTINEL", "account_id": "demo", "region": "london"}, events.append)
+    await environment.execute("subscribe", {"symbols": ["GOLDm", "EURUSD.a"]})
+    await environment.execute("subscribe", {"symbols": ["GOLDm"]})
+    stream.connect.assert_awaited_once()
+    stream.unsubscribe_from_market_data.assert_awaited_once_with("EURUSD.a", [{"type": "quotes"}])
+    assert len(listeners) == 1
+    await listeners[0].on_symbol_prices_updated("0", [{"symbol": "GOLDm"}, {"symbol": "EURUSD.a"}])
+    assert events[0]["prices"] == [{"symbol": "GOLDm"}]
+    await environment.execute("subscribe", {"symbols": []})
+    stream.close.assert_awaited_once()
+
+
+async def test_sdk_process_death_after_outbound_trade_is_uncertain_and_never_replayed(client, tmp_path, monkeypatch):
+    from test_execution import approve, setup
+
+    from nanobot.agent.tools.context import RequestContext, request_context
+    preview, executor, registry = await setup(tmp_path, client)
+    legacy_transport, original_request = client.transport, client._request
+    async def reads(method, path, **kwargs):
+        if method != "GET":
+            raise AssertionError("No HTTP trade is permitted")
+        client.transport = legacy_transport
+        try:
+            return await original_request(method, path, **kwargs)
+        finally:
+            client.transport = None
+    monkeypatch.setattr(client, "_request", reads)
+    client.transport = None
+    marker = tmp_path / "accepted-fixture-request"
+    script = 'import sys,json,os;from pathlib import Path\nsys.stdin.readline()\nfor line in sys.stdin:\n r=json.loads(line)\n if r["operation"]=="trade":\n  Path(' + repr(str(marker)) + ').write_text("accepted once");os._exit(1)\n print(json.dumps({"ok":True,"data":{"ready":True}}),flush=True)'
+    process = await asyncio.create_subprocess_exec(sys.executable, "-I", "-c", script,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    process.stdin.write(b'{}\n')
+    await process.stdin.drain()
+    bridge = SDKBridge(client.connection, client.secrets)
+    bridge._process = process
+    start = AsyncMock(return_value=process)
+    monkeypatch.setattr(bridge, "_start", start)
+    monkeypatch.setattr("nanobot.trading.sdk_bridge.account_bridge", lambda *_: bridge)
+    try:
+        with request_context(RequestContext(channel="websocket", chat_id="main", session_key="websocket:main")):
+            approve(preview, executor.effects)
+            result = json.loads(await registry.execute("trade_execute", {"preview_id": preview.id}))
+            assert result["state"] == "UNCERTAIN"
+            first_calls = start.await_count
+            result = await registry.execute("trade_execute", {"preview_id": preview.id})
+            assert json.loads(result)["state"] == "UNCERTAIN" and start.await_count == first_calls
+        assert marker.read_text() == "accepted once"
+        assert executor.effects.find_effect(preview.effect_key).state == "UNCERTAIN"
+    finally:
+        await bridge.close()

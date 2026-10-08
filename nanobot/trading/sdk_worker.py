@@ -15,7 +15,7 @@ import socket
 import sys
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 from urllib.request import getproxies
 
@@ -163,7 +163,7 @@ async def trade(rpc: Any, payload: dict[str, Any]) -> Any:
 
 
 class AccountEnvironment:
-    def __init__(self, bootstrap: dict[str, str]):
+    def __init__(self, bootstrap: dict[str, str], emit: Callable[[dict[str, Any]], None] | None = None):
         sdk = importlib.import_module("metaapi_cloud_sdk")
         self.api = sdk.MetaApi(bootstrap["token"], {
             "region": bootstrap["region"], "requestTimeout": 20, "connectTimeout": 20,
@@ -173,10 +173,57 @@ class AccountEnvironment:
         self.account_id = bootstrap["account_id"]
         self.account: Any = None
         self.rpc: Any = None
+        self.stream: Any = None
+        self.subscribed: set[str] = set()
+        self.emit = emit
+
+    async def subscribe(self, symbols: list[str]) -> dict[str, bool]:
+        desired = set(symbols)
+        if len(desired) > 100 or any(not 1 <= len(symbol) <= 80
+                                    or not symbol.isprintable() for symbol in desired):
+            raise ValueError("Invalid broker subscription")
+        if not desired:
+            if self.stream is not None:
+                await self.stream.close()
+                self.stream = None
+            self.subscribed.clear()
+            return {"subscribed": False}
+        if self.stream is None:
+            listener_module = importlib.import_module("metaapi_cloud_sdk.clients.metaapi.synchronization_listener")
+            environment = self
+
+            class Listener(listener_module.SynchronizationListener):
+                async def on_symbol_prices_updated(self, instance_index: str, prices: list[dict[str, Any]],
+                                                   equity: Any = None, margin: Any = None, free_margin: Any = None,
+                                                   margin_level: Any = None, account_currency_exchange_rate: Any = None) -> None:
+                    selected = [price for price in prices if price.get("symbol") in environment.subscribed]
+                    if selected and environment.emit:
+                        environment.emit({"kind": "prices", "ok": True, "prices": selected})
+
+                async def on_disconnected(self, instance_index: str) -> None:
+                    # The SDK reconnects/synchronizes its connection. Never
+                    # invent broker prices or replay trading requests here.
+                    if environment.emit:
+                        environment.emit({"kind": "stream_status", "ok": False, "error": "disconnected"})
+
+            self.stream = self.account.get_streaming_connection()
+            self.stream.add_synchronization_listener(Listener())
+            await self.stream.connect()
+        await self.stream.wait_synchronized({"timeoutInSeconds": 20})
+        old = set(self.subscribed)
+        self.subscribed = desired
+        for symbol in sorted(old - desired):
+            await self.stream.unsubscribe_from_market_data(symbol, [{"type": "quotes"}])
+        for symbol in sorted(desired - old):
+            await self.stream.subscribe_to_market_data(symbol, [{"type": "quotes"}], timeout_in_seconds=20,
+                                                      wait_for_quote=False)
+        return {"subscribed": True}
 
     async def execute(self, operation: str, params: dict[str, Any]) -> Any:
         if self.account is None:
             self.account = await self.api.metatrader_account_api.get_account(self.account_id)
+        if operation == "subscribe":
+            return await self.subscribe(params["symbols"])
         if operation == "connection":
             await self.account.reload()
             return {"_id": self.account.id, "state": self.account.state,
@@ -220,6 +267,8 @@ class AccountEnvironment:
         raise ValueError("Unsupported SDK operation")
 
     async def close(self) -> None:
+        if self.stream is not None:
+            await self.stream.close()
         if self.rpc is not None:
             await self.rpc.close()
         self.api.close()
@@ -232,7 +281,11 @@ async def run() -> None:
     importlib.import_module("metaapi_cloud_sdk.logger").LoggerManager.use_logging()
     install_network_boundary()
     bootstrap = json.loads(await asyncio.to_thread(sys.stdin.readline))
-    environment = AccountEnvironment(bootstrap)
+    def emit(frame: dict[str, Any]) -> None:
+        wire.write(json.dumps(frame, default=json_default, allow_nan=False) + "\n")
+        wire.flush()
+
+    environment = AccountEnvironment(bootstrap, emit)
     try:
         while line := await asyncio.to_thread(sys.stdin.readline):
             try:
@@ -244,8 +297,7 @@ async def run() -> None:
                 # classified code crosses IPC; never raw exception strings.
                 rejected = type(exc).__name__ in {"TradeException", "ValidationException", "UnauthorizedException", "ForbiddenException", "NotFoundException"}
                 reply = {"ok": False, "error": "rejected" if rejected else "unavailable"}
-            wire.write(json.dumps(reply, default=json_default, allow_nan=False) + "\n")
-            wire.flush()
+            emit(reply)
     finally:
         await environment.close()
 
