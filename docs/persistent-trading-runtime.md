@@ -69,7 +69,10 @@ behavior. Read/local work is allowed; forbidden work is denied before review.
 receiving only the structured action. Hard deterministic denial cannot be
 overridden. Reviewer errors/timeouts safely ask the user. All consequential
 mutations require explicit approval in the initial policy, even if review allows
-them. Autonomous trading is not enabled.
+them unless an explicitly user-approved bounded trading mandate covers the
+action. Delegated live trading is disabled by default. See
+[delegated-trading-runtime.md](delegated-trading-runtime.md) for the optional
+mandate/risk/observation path and its conservative limitations.
 
 Approvals are durable, expire, bind the exact fingerprint/principal and are
 consumed once. Changed account, mapping revision, symbol, intent, quantity,
