@@ -35,8 +35,8 @@ class MarketRecommendation(BaseModel):
     @classmethod
     def prices(cls, value: list[Decimal] | Decimal | None) -> list[Decimal] | Decimal | None:
         values = value if isinstance(value, list) else [value] if value is not None else []
-        if any(not price.is_finite() or price <= 0 or price > Decimal("1e30") for price in values):
-            raise ValueError("Prices must be positive, finite and bounded")
+        if any(not price.is_finite() or price < Decimal("1e-18") or price > Decimal("1e30") or len(price.as_tuple().digits) > 60 for price in values):
+            raise ValueError("Prices must be finite, between 1e-18 and 1e30, with at most 60 significant digits")
         return value
 
 

@@ -61,3 +61,9 @@ async def test_recommendation_is_display_only_and_needs_no_account(market):
     market.client.quote.assert_not_awaited()
     with pytest.raises(ValidationError):
         MarketRecommendation(instrument="gold", intent="BUY", summary="bad price", stop_loss="NaN")
+
+
+@pytest.mark.parametrize("price", ["NaN", "Infinity", "-1", "0", "1e-1000000", "1e1000000", "1." + "0" * 1000])
+def test_recommendation_rejects_unbounded_decimal_serialization(price):
+    with pytest.raises(ValidationError):
+        MarketRecommendation(instrument="gold", intent="BUY", summary="Fixture", stop_loss=price)
