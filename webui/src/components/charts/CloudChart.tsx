@@ -35,7 +35,7 @@ export function CloudChart({ reference }: { reference: string }) {
     const feed: Datafeed = {
       searchSymbols: async () => [{ ticker: chart.provider_instrument, name: chart.canonical_instrument }],
       getHistoryKLineData: async (_symbol, _period, _from, to) => {
-        const page = await fetchChartCandles(token, chartId, sessionKey, new Date(to).toISOString());
+        const page = await fetchChartCandles(token, chartId, sessionKey, new Date(chart.visible_range?.[1] ?? to).toISOString(), chart.candle_count ?? 200);
         if (closed) return [];
         return page.candles.map(c => ({ timestamp: Date.parse(c.time), open: Number(c.open), high: Number(c.high),
           low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 }));

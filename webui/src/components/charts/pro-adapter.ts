@@ -35,6 +35,8 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     if (disposed) return;
     const core = getCore();
     if (!core) return;
+    core.setOffsetRightDistance(state.right_spacing ?? 40);
+    if (!state.visible_range) core.setBarSpace(container.clientWidth / (state.candle_count ?? 200));
     for (const annotation of state.annotations) {
       const names: Record<string, string> = { horizontal_line: "horizontalStraightLine", trend_line: "segment", price_zone: "rect", marker: "simpleAnnotation", note: "simpleAnnotation", entry: "simpleTag", stop: "simpleTag", target: "simpleTag" };
       core.createOverlay({ id: annotation.id, name: names[annotation.type] ?? "horizontalStraightLine", lock: true,

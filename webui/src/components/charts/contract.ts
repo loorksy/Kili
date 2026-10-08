@@ -15,6 +15,8 @@ export interface CloudChartState {
   session_key: string;
   annotations: ChartAnnotation[];
   studies: string[];
+  candle_count?: number;
+  right_spacing?: number;
   visible_range?: [number, number] | null;
 }
 export interface ChartReference {

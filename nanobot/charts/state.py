@@ -50,6 +50,10 @@ class CloudChart(RuntimeRecord):
     provider: Literal["oanda"] = "oanda"
     provider_instrument: str
     timeframe: str
+    # Additive workstation format: legacy charts receive deterministic defaults.
+    workstation_version: Literal[1] = 1
+    candle_count: int = Field(default=200, ge=2, le=5000)
+    right_spacing: int = Field(default=40, ge=0, le=500)
     visible_range: tuple[int, int] | None = None
     layout: dict[str, JsonValue] = Field(default_factory=dict)
     studies: list[str] = Field(default_factory=list, max_length=20)

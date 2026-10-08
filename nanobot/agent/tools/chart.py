@@ -11,13 +11,17 @@ from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import CloudChartChanged
+from nanobot.charts.controller import ChartController, ViewOperation
 from nanobot.charts.state import Annotation, ChartActor, ChartPoint, ChartService
 from nanobot.security.actions import now_ms
 
 
 class ChartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "set_studies", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations"]
+    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "set_studies", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations", "view", "inspect_candle"]
+    view: ViewOperation | None = None
+    candle_timestamp: int | None = None
+    candle_index: int | None = None
     chart_id: str | None = None
     expected_revision: int | None = None
     canonical_instrument: str | None = None
@@ -92,9 +96,15 @@ class ChartTool(Tool):
             chart = self.service.get(request.chart_id, actor)
             if request.operation == "get":
                 return chart.model_dump_json()
+            if request.operation == "inspect_candle":
+                return ChartController(self.service).inspect(chart, timestamp=request.candle_timestamp, index=request.candle_index).model_dump_json()
             if request.expected_revision is None:
                 raise ValueError("Expected chart revision is required")
-            if request.operation == "set_timeframe":
+            if request.operation == "view":
+                if request.view is None:
+                    raise ValueError("Structured viewport operation is required")
+                chart = ChartController(self.service).view(chart, actor, request.expected_revision, request.view)
+            elif request.operation == "set_timeframe":
                 if not request.timeframe:
                     raise ValueError("Timeframe is required")
                 chart.timeframe = request.timeframe
@@ -140,7 +150,8 @@ class ChartTool(Tool):
                     if not any(a.id == request.annotation_id for a in chart.annotations):
                         raise ValueError("Unknown annotation")
                     chart.annotations = [a for a in chart.annotations if a.id != request.annotation_id]
-            chart = self.service.update(chart, actor, request.expected_revision)
+            if request.operation != "view":
+                chart = self.service.update(chart, actor, request.expected_revision)
         if self.bus:
             session_key = chart.session_key
             channel, _, chat_id = session_key.partition(":")
