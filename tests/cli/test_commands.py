@@ -2073,7 +2073,14 @@ def _patch_cli_command_runtime(
     if message_bus is not None:
         monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
     if session_manager is not None:
-        monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
+        def scoped_session_manager(workspace):
+            from nanobot.session.responsibilities import ResponsibilityStore
+            manager = session_manager(workspace)
+            if not hasattr(manager, "responsibilities"):
+                manager.workspace = workspace
+                manager.responsibilities = ResponsibilityStore(workspace)
+            return manager
+        monkeypatch.setattr("nanobot.session.manager.SessionManager", scoped_session_manager)
     if cron_service is not None:
         monkeypatch.setattr("nanobot.cron.service.CronService", cron_service)
     if get_cron_dir is not None:
@@ -3465,6 +3472,12 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
             seen.setdefault("cron_reconciliation", []).append("status")
             return {"jobs": 0}
 
+        def register_deadline_source(self, _name, _nearest, _run_due) -> None:
+            return None
+
+        def reschedule(self) -> None:
+            return None
+
         def register_system_job(self, _job) -> None:
             return None
 
@@ -3774,6 +3787,12 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         def status(self) -> dict[str, int]:
             return {"jobs": 0}
 
+        def register_deadline_source(self, _name, _nearest, _run_due) -> None:
+            return None
+
+        def reschedule(self) -> None:
+            return None
+
         def register_system_job(self, _job) -> None:
             return None
 
@@ -4009,6 +4028,12 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
         def status(self) -> dict[str, int]:
             return {"jobs": 0}
 
+        def register_deadline_source(self, _name, _nearest, _run_due) -> None:
+            return None
+
+        def reschedule(self) -> None:
+            return None
+
         def register_system_job(self, _job) -> None:
             return None
 
@@ -4125,6 +4150,12 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
 
         def status(self) -> dict[str, int]:
             return {"jobs": 0}
+
+        def register_deadline_source(self, _name, _nearest, _run_due) -> None:
+            return None
+
+        def reschedule(self) -> None:
+            return None
 
         def register_system_job(self, _job) -> None:
             return None

@@ -359,6 +359,8 @@ def _run_gateway(
     gateway_instance: GatewayInstance | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
+    from nanobot.security.financial_auth import require_financial_gateway_auth
+    require_financial_gateway_auth(config)
     from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
@@ -902,6 +904,17 @@ def _run_gateway(
     cron.register_deadline_source("action_results",
         lambda: now_ms() if action_journal.pending_resolutions() else None,
         _queue_resolved_actions)
+
+    if config.tools.integrations.metaapi:
+        from nanobot.trading.execution import TradeExecutor
+        from nanobot.trading.metaapi import MetaApiClient
+        from nanobot.trading.proposals import TradeProposals
+        from nanobot.trading.recovery import TradeRecovery
+        trade_recovery = TradeRecovery(
+            TradeExecutor(TradeProposals(MetaApiClient(config.tools.integrations.metaapi))),
+            session_manager.responsibilities,
+        )
+        cron.register_deadline_source("external_effects", trade_recovery.nearest, trade_recovery.run_due)
 
 
     cron.register_system_job(CronJob(

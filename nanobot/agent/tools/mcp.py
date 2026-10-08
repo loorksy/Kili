@@ -618,6 +618,8 @@ class MCPToolWrapper(_MCPWrapperBase):
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        annotations = getattr(tool_def, "annotations", None)
+        self.action_class = "read" if annotations and annotations.readOnlyHint is True else "consequential"
 
     @property
     def name(self) -> str:
@@ -655,7 +657,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                 logger.warning("MCP tool '{}' was cancelled by server/SDK", self._name)
                 return ToolResult.error("(MCP tool call was cancelled)")
             except Exception as exc:
-                if await self._refresh_session_after_termination(
+                if self.action_class == "read" and await self._refresh_session_after_termination(
                     exc,
                     refreshed_session,
                     "tool",
@@ -663,7 +665,7 @@ class MCPToolWrapper(_MCPWrapperBase):
                     refreshed_session = True
                     continue
                 if _is_transient(exc):
-                    if not retried_transient:
+                    if not retried_transient and self.action_class == "read":
                         retried_transient = True
                         logger.warning(
                             "MCP tool '{}' hit transient error ({}), retrying once...",

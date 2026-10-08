@@ -195,6 +195,14 @@ class ActionStore:
             record.resolution_queued = True
             db.execute("UPDATE approvals SET record=? WHERE id=?",(record.model_dump_json(),record.id))
 
+    def read_approval(self, approval_id: str, principal: str) -> dict[str, JsonValue]:
+        with self.transaction() as db:
+            approval = self._approval(db, approval_id)
+        if approval.action.principal != principal:
+            raise PermissionError("Approval belongs to another conversation")
+        status = "EXPIRED" if approval.status == "PENDING" and approval.expires_at <= now_ms() else approval.status
+        return {"id": approval.id, "status": status, "action": approval.action.parameters}
+
     def consume_approval(self, action: Action) -> Approval | None:
         with self.transaction() as db:
             rows = db.execute("SELECT record FROM approvals WHERE fingerprint=?", (action.fingerprint,)).fetchall()
@@ -245,7 +253,7 @@ class ActionStore:
         db.execute("UPDATE effects SET record=? WHERE id=?", (effect.model_dump_json(), effect.id))
 
     def start_effect(self, effect_id: str, *, approval_id: str | None = None, owner: EffectOwner | None = None) -> Effect:
-        with self.transaction() as db:
+        with self.owner_scope(owner), self.transaction() as db:
             effect = self._effect(db, effect_id)
             if effect.state != "PROPOSED":
                 raise ValueError("Effect cannot be replayed; reconcile interrupted execution")
@@ -267,7 +275,7 @@ class ActionStore:
 
     def finish_effect(self, claimed: Effect, *, state: Literal["SUCCEEDED", "FAILED", "UNCERTAIN"],
                       result: JsonValue = None, provider_reference: str | None = None) -> Effect:
-        with self.transaction() as db:
+        with self.owner_scope(claimed.owner), self.transaction() as db:
             effect = self._effect(db, claimed.id)
             if (effect.generation, effect.token) != (claimed.generation, claimed.token) or not effect.token:
                 raise PermissionError("Stale effect ownership")
@@ -279,6 +287,19 @@ class ActionStore:
             return effect
 
     @staticmethod
+    @contextmanager
+    def owner_scope(owner: EffectOwner | None) -> Generator[None, None, None]:
+        if owner is None:
+            yield
+            return
+        from nanobot.session.responsibilities import ExecutionClaim, ResponsibilityStore
+        store = ResponsibilityStore(Path(owner.workspace))
+        claim = ExecutionClaim(responsibility_id=owner.responsibility_id, wake_id=owner.wake_id,
+                               generation=owner.generation, token=owner.token)
+        with store.ownership(claim):
+            yield
+
+    @staticmethod
     def validate_effect_owner(effect: Effect) -> None:
         if effect.owner:
             from nanobot.session.responsibilities import ExecutionClaim, ResponsibilityStore
@@ -286,6 +307,21 @@ class ActionStore:
             ResponsibilityStore(Path(owner.workspace)).assert_owner(ExecutionClaim(
                 responsibility_id=owner.responsibility_id,wake_id=owner.wake_id,
                 generation=owner.generation,token=owner.token))
+
+    def approvals_for_proposal(self, proposal_id: str) -> list[Approval]:
+        with self.transaction() as db:
+            approvals = [Approval.model_validate_json(row[0]) for row in db.execute("SELECT record FROM approvals")]
+        return [approval for approval in approvals if approval.action.parameters.get("proposal_id") == proposal_id]
+
+    def unresolved_action(self, fingerprint: str) -> bool:
+        with self.transaction() as db:
+            effects = [Effect.model_validate_json(row[0]) for row in db.execute("SELECT record FROM effects")]
+        return any(effect.fingerprint == fingerprint and effect.state in {"STARTED", "UNCERTAIN", "RECONCILING"}
+                   for effect in effects)
+
+    def list_effects(self) -> list[Effect]:
+        with self.transaction() as db:
+            return [Effect.model_validate_json(row[0]) for row in db.execute("SELECT record FROM effects")]
 
     def recover(self) -> int:
         """Gateway-exclusive startup; do not call while another gateway owns execution."""
@@ -301,7 +337,7 @@ class ActionStore:
         return count
 
     def claim_reconciliation(self, effect_id: str, *, owner: EffectOwner | None = None) -> Effect:
-        with self.transaction() as db:
+        with self.owner_scope(owner), self.transaction() as db:
             effect = self._effect(db, effect_id)
             if effect.state != "UNCERTAIN":
                 raise ValueError("Only uncertain effects can be reconciled")
@@ -348,6 +384,8 @@ class ActionPolicy:
             existing = store.find_effect(effect_key)
             if existing and existing.fingerprint == action.fingerprint and existing.state != "PROPOSED":
                 return None  # Executor can only return/reconcile the existing effect, never resend.
+        if store.unresolved_action(action.fingerprint):
+            return "Previous external action is uncertain; reconcile it before another request"
         consumed = store.consume_approval(action)
         if consumed:
             _POLICY_APPROVAL.set((action.fingerprint,consumed.id))

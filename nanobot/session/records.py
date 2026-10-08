@@ -1,7 +1,8 @@
 """Versioned operational records sharing the protected action journal transaction boundary."""
 from __future__ import annotations
 
-from typing import Generic, Literal, TypeVar
+from contextlib import ExitStack, contextmanager
+from typing import Generator, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,8 +40,28 @@ class RecordStore(Generic[_RecordT]):
             rows = db.execute("SELECT record FROM records WHERE namespace=? ORDER BY id", (self.namespace,)).fetchall()
         return [self.model.model_validate_json(row[0]) for row in rows]
 
+    @staticmethod
+    @contextmanager
+    def execution_write() -> Generator[None, None, None]:
+        from nanobot.agent.tools.context import current_request_context
+        from nanobot.session.responsibilities import StaleExecutionError
+        request = current_request_context()
+        with ExitStack() as stack:
+            if request:
+                if request.responsibility_scope.closed:
+                    raise StaleExecutionError("Execution scope is closed")
+                executions = sorted(request.responsibility_scope.executions.values(),
+                                    key=lambda execution: str(execution.store.root))
+                for execution in executions:
+                    child = stack.enter_context(execution.store.ownership(execution.claim))
+                    if child.parent_responsibility_id:
+                        parent = execution.store.get(child.parent_responsibility_id)
+                        if parent.execution_generation != child.parent_execution_generation:
+                            raise StaleExecutionError("Delegation was superseded")
+            yield
+
     def create(self, record: _RecordT) -> _RecordT:
-        with self.journal.transaction() as db:
+        with self.execution_write(), self.journal.transaction() as db:
             db.execute("INSERT INTO records VALUES (?,?,?,?)", (self.namespace, record.id, record.revision, record.model_dump_json()))
         return record.model_copy(deep=True)
 
@@ -48,7 +69,7 @@ class RecordStore(Generic[_RecordT]):
         updated = record.model_copy(deep=True)
         updated.revision += 1
         updated.updated_at = now_ms()
-        with self.journal.transaction() as db:
+        with self.execution_write(), self.journal.transaction() as db:
             cursor = db.execute("UPDATE records SET revision=?,record=? WHERE namespace=? AND id=? AND revision=?",
                                 (updated.revision, updated.model_dump_json(), self.namespace, record.id, record.revision))
             if cursor.rowcount != 1:

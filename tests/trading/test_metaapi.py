@@ -46,3 +46,17 @@ async def test_provider_rejection_is_redacted(tmp_path):
     with pytest.raises(ProviderRejectedError) as exc:
         await client.account()
     assert "PRIVATE_META_SENTINEL" not in str(exc.value)
+
+
+async def test_provider_cannot_reflect_credential_into_account_output(client):
+    import httpx
+    transport = client.transport
+    def handler(request):
+        if request.url.path.endswith("account-information"):
+            return httpx.Response(200, json={"balance":"1000", "equity":"1000", "margin":"0", "freeMargin":"1000",
+                                          "currency":"USD", "broker":request.headers["auth-token"], "tradeAllowed":True})
+        return transport.handler(request)
+    client.transport = httpx.MockTransport(handler)
+    result = (await client.account()).model_dump_json()
+    assert "PRIVATE_META_SENTINEL" not in result
+    assert "[redacted]" in result

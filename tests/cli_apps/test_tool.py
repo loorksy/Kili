@@ -53,6 +53,9 @@ def test_run_cli_app_uses_installed_registry_app(
     )
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        # Assert application argv after the mandatory outer isolation wrapper.
+        if "--" in argv and "--die-with-parent" in argv:
+            argv = argv[argv.index("--") + 1:]
         assert "shell" not in kwargs or kwargs["shell"] is False
         return subprocess.CompletedProcess(
             argv,

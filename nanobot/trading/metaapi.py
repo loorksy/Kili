@@ -37,6 +37,7 @@ class BrokerItem(BaseModel):
     volume: Decimal | None = None
     client_id: str | None = Field(default=None, alias="clientId")
     comment: str | None = None
+    state: str | None = None
     open_price: Decimal | None = Field(default=None, alias="openPrice")
     stop_loss: Decimal | None = Field(default=None, alias="stopLoss")
     take_profit: Decimal | None = Field(default=None, alias="takeProfit")
@@ -113,7 +114,7 @@ class MetaApiClient:
                         raise ProviderRejectedError(f"MetaApi rejected operation (HTTP {response.status_code})")
                     if response.status_code >= 300:
                         raise ProviderUnavailableError("MetaApi operation unavailable; mutation outcome may be uncertain")
-                    return response.json()
+                    return token.redact(response.json())
                 except (httpx.HTTPError, ValueError):
                     if attempt + 1 < attempts:
                         await asyncio.sleep(.1 * 2 ** attempt)

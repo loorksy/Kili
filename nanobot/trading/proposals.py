@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
@@ -97,10 +98,20 @@ class TradeProposals:
                rationale: str = "", evidence: list[str] | None = None, charts: list[str] | None = None) -> TradeProposal:
         # Missing/ambiguous mappings stop before a proposal can target execution.
         self.mappings.require(self.client.connection.account_id, intent.canonical_instrument)
-        return self.proposals.create(TradeProposal(id="proposal_" + uuid.uuid4().hex,
+        record = self.proposals.create(TradeProposal(id="proposal_" + uuid.uuid4().hex,
             principal=principal, responsibility_id=responsibility_id,
             account_id=self.client.connection.account_id, intent=intent,
             rationale_summary=rationale, evidence_refs=evidence or [], chart_refs=charts or []))
+        self.record_lifecycle(record, "PROPOSED")
+        return record
+
+    def record_lifecycle(self, proposal: TradeProposal, kind: str, preview_id: str | None = None) -> None:
+        from nanobot.trading.execution import TradeJournalEntry
+        journal = RecordStore("trade_journal", TradeJournalEntry, self.proposals.journal)
+        identity = hashlib.sha256(f"{proposal.id}:{kind}:{preview_id}".encode()).hexdigest()
+        journal.create(TradeJournalEntry(id="journal_" + identity, proposal_id=proposal.id,
+            responsibility_id=proposal.responsibility_id, preview_id=preview_id, kind=kind,
+            evidence_refs=proposal.evidence_refs))
 
     @staticmethod
     def validate_spec(intent: TradeIntent, spec: SymbolSpec) -> None:
@@ -131,8 +142,15 @@ class TradeProposals:
         if symbol not in await self.client.symbols():
             raise ValueError("Verified broker symbol is no longer available")
         spec = await self.client.specification(symbol)
+        if spec.symbol != symbol:
+            raise ValueError("Broker specification returned a different symbol")
         self.validate_spec(intent, spec)
         price = await self.client.price(symbol)
+        if price.symbol != symbol or price.bid <= 0 or price.ask < price.bid:
+            raise ValueError("Broker price does not match the requested symbol")
+        observed = datetime.fromisoformat(price.time.replace("Z", "+00:00"))
+        if observed.tzinfo is None or not -30 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 300:
+            raise ValueError("Broker price is stale or has no trusted timestamp")
         if intent.operation != "open":
             kind = "orders" if intent.operation in {"modify_order", "cancel_order"} else "positions"
             targets = await self.client.items(kind)
@@ -167,6 +185,11 @@ class TradeProposals:
     async def preview(self, proposal_id: str, principal: str) -> TradePreview:
         proposal = self.proposals.get(proposal_id)
         self.require_owner(principal, proposal.principal)
+        if proposal.preview_id:
+            previous = self.previews.get(proposal.preview_id)
+            effect = self.previews.journal.find_effect(previous.effect_key)
+            if effect and effect.state in {"STARTED", "UNCERTAIN", "RECONCILING", "SUCCEEDED"}:
+                raise ValueError("Existing external effect must be resolved before another preview")
         if proposal.status in {"UNCERTAIN", "EXECUTED"}:
             raise ValueError("Reconcile or inspect the existing effect before another preview")
         if proposal.account_id != self.client.connection.account_id:
@@ -184,6 +207,7 @@ class TradeProposals:
             effect_key=key))
         proposal.preview_id, proposal.status = record.id, "PREVIEWED"
         self.proposals.save(proposal)
+        self.record_lifecycle(proposal, "PREVIEWED", record.id)
         return record
 
     def require_preview(self, preview_id: str, principal: str) -> TradePreview:

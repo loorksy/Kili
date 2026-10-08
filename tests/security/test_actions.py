@@ -156,3 +156,12 @@ def test_approval_resolution_durably_wakes_once(tmp_path):
     responsibility,=responsibilities.list()
     assert list(responsibility.wakes)==[f"approval:{approval.id}"]
     assert not store.pending_resolutions()
+
+
+def test_approval_snapshot_is_backend_owned_and_scoped(tmp_path):
+    store = ActionStore(tmp_path / "state.db")
+    action = Action(tool="trade_execute", action_class="consequential", parameters={"volume":"0.1"}, principal="websocket:main")
+    approval = store.request(action)
+    assert store.read_approval(approval.id, action.principal)["action"] == action.parameters
+    with pytest.raises(PermissionError):
+        store.read_approval(approval.id, "websocket:other")

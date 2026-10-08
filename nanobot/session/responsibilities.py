@@ -9,7 +9,9 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -26,6 +28,7 @@ ResponsibilityState = Literal[
     "WAITING_FOR_SUBAGENT", "SCHEDULED", "PAUSED", "COMPLETED", "FAILED", "CANCELLED",
 ]
 TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
+_HELD_ROOTS: ContextVar[frozenset[str]] = ContextVar("responsibility_write_roots", default=frozenset())
 
 
 class ResponsibilityCheckpoint(BaseModel):
@@ -151,6 +154,20 @@ class ResponsibilityStore:
                 or record.active_wake_id != claim.wake_id):
             raise StaleExecutionError("Stale responsibility execution ownership")
         return record
+
+    @contextmanager
+    def ownership(self, claim: ExecutionClaim) -> Generator[Responsibility, None, None]:
+        """Fence cross-store writes against concurrent execution takeover."""
+        key = str(self.root)
+        if key in _HELD_ROOTS.get():
+            yield self.assert_owner(claim)
+            return
+        with self._lock:
+            token = _HELD_ROOTS.set(_HELD_ROOTS.get() | {key})
+            try:
+                yield self.assert_owner(claim)
+            finally:
+                _HELD_ROOTS.reset(token)
 
     def save(self, record: Responsibility, *, claim: ExecutionClaim) -> Responsibility:
         """All execution writes require the originally claimed immutable token."""

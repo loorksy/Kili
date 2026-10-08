@@ -102,7 +102,7 @@ class OandaClient:
                             continue
                     if response.status_code >= 300:
                         raise ProviderUnavailableError(f"OANDA read rejected (HTTP {response.status_code})")
-                    return response.json()
+                    return token.redact(response.json())
                 except (httpx.HTTPError, ValueError):
                     if attempt < 2:
                         await asyncio.sleep(.1 * 2 ** attempt)
@@ -141,7 +141,10 @@ class OandaClient:
             params["to"] = datetime.fromisoformat(before.replace("Z", "+00:00")).isoformat()
         data = await self._get(f"/v3/instruments/{symbol}/candles", params)
         now = datetime.now(timezone.utc)
-        return [Candle(canonical_instrument=canonical, provider_instrument=symbol, time=c.time,
+        candles = [Candle(canonical_instrument=canonical, provider_instrument=symbol, time=c.time,
                        open=c.mid.o, high=c.mid.h, low=c.mid.low, close=c.mid.c,
                        volume=c.volume, complete=c.complete, source="oanda", fetched_at=now)
                 for c in parse_provider(_Candles, data).candles]
+        from nanobot.market.cache import MarketCache
+        MarketCache().put(symbol, canonical, timeframe, candles)
+        return candles

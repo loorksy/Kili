@@ -137,6 +137,8 @@ class _LegacyErrorPrefixTool(Tool):
 
     def __init__(self, wrapped: Tool) -> None:
         self._wrapped = wrapped
+        self.action_class = wrapped.action_class
+        self.manages_effects = wrapped.manages_effects
 
     @property
     def name(self) -> str:
@@ -149,6 +151,9 @@ class _LegacyErrorPrefixTool(Tool):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._wrapped.parameters
+
+    def action_parameters(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._wrapped.action_parameters(params)
 
     def runtime_context_provider(self):
         return self._wrapped.runtime_context_provider()

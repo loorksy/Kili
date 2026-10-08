@@ -188,6 +188,7 @@ class Tool(ABC):
 
     # Static gateway classification, never controlled by model parameters.
     action_class: Literal["local", "read", "consequential", "forbidden"] = "local"
+    manages_effects: bool = False
 
     _TYPE_MAP = _JSON_TYPE_MAP
     _BOOL_TRUE = frozenset(("true", "1", "yes"))

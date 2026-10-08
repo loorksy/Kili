@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
+from typing import cast
 
 from nanobot.security.runtime_storage import internal_state_root
 
@@ -16,6 +18,18 @@ class SecretValue:
 
     def __repr__(self) -> str:
         return "SecretValue(<redacted>)"
+
+    def redact(self, payload: object) -> object:
+        """Scrub credential reflection from provider JSON before parsing or persistence."""
+        if isinstance(payload, str):
+            return payload.replace(self._value, "[redacted]")
+        if isinstance(payload, list):
+            # Provider response.json() has JSON arrays/objects, never executable objects.
+            return [self.redact(item) for item in cast(list[object], payload)]
+        if isinstance(payload, dict):
+            return {key.replace(self._value, "[redacted]"): self.redact(value)
+                    for key, value in cast(dict[str, object], payload).items()}
+        return payload
 
     def reveal(self) -> str:
         """Trusted HTTP adapter only; never put this value into a tool result."""
@@ -35,16 +49,32 @@ class SecretStore:
 
     def put(self, reference: str, value: str) -> None:
         path = self.root / self._name(reference)
-        # Never return stored values through config/API readback.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
+        if path.is_symlink():
+            raise ValueError("Secret references cannot be symlinks")
+        fd, temporary = tempfile.mkstemp(prefix=".secret-", dir=self.root)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(value)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            if os.name != "nt":
+                directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
     def resolve(self, reference: str) -> SecretValue:
         try:
-            value = (self.root / self._name(reference)).read_text()
+            path = self.root / self._name(reference)
+            if path.is_symlink():
+                raise ValueError("Secret references cannot be symlinks")
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd) as stream:
+                value = stream.read()
         except OSError:
             raise ValueError("Connection credential is not configured") from None
         if not value:

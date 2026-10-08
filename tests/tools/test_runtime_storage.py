@@ -11,6 +11,31 @@ from nanobot.session.responsibilities import ResponsibilityStore
 
 
 @pytest.mark.asyncio
+async def test_application_login_configuration_is_not_a_tool_resource(tmp_path, monkeypatch):
+    config = tmp_path / "instance" / "config.json"
+    config.parent.mkdir()
+    config.write_text('{"token": "PRIVATE_LOGIN_SENTINEL"}')
+    monkeypatch.setattr("nanobot.security.runtime_storage.get_config_path", lambda: config)
+    alias = tmp_path / "login-link"
+    alias.symlink_to(config)
+    for path in (config, alias):
+        assert "Protected runtime" in await ReadFileTool(workspace=tmp_path).execute(str(path))
+        assert "Protected runtime" in await WriteFileTool(workspace=tmp_path).execute(str(path), "forged")
+    if sys.platform == "linux":
+        script = f'''from pathlib import Path
+p=Path({str(config)!r})
+try:
+    assert p.read_text() == ""
+except PermissionError:
+    pass
+print("LOGIN HIDDEN")
+'''
+        result = await ExecTool(working_dir=str(tmp_path)).execute(command=shlex.join([sys.executable, "-c", script]))
+        assert "LOGIN HIDDEN" in result and "PRIVATE_LOGIN_SENTINEL" not in result
+    assert "PRIVATE_LOGIN_SENTINEL" in config.read_text()
+
+
+@pytest.mark.asyncio
 async def test_internal_state_is_denied_even_with_unrestricted_file_tools(tmp_path):
     store = ResponsibilityStore(tmp_path)
     record = store.create(objective="Protected", session_key=None, channel="", chat_id="")
@@ -84,6 +109,10 @@ mcp.run(transport="stdio")
     try:
         assert "fixture" in connections
         name, = registry.tool_names
+        from nanobot.security.actions import Action, ActionStore
+        action = Action(tool=name, action_class="consequential", parameters={"path": str(path)}, principal="gateway")
+        approval = ActionStore().request(action)
+        ActionStore().resolve(approval.id, principal="gateway", approve=True)
         result = await registry.execute(name, {"path": str(path)})
         assert "WRITE DENIED" in result
         assert store.get(record.id).objective == "MCP protected"

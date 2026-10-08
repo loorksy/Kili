@@ -52,7 +52,7 @@ def _run_mcp_server(port: int, ready_event: multiprocessing.Event) -> None:
 
     mcp = FastMCP("IdleTimeoutDemo", json_response=True, port=port)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True})
     def greet(name: str = "World") -> str:  # noqa: N802
         """Greet someone."""
         return f"Hello, {name}!"

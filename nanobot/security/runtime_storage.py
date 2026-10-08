@@ -26,7 +26,7 @@ def internal_state_root(*, create: bool = False) -> Path:
 def require_non_internal_path(path: Path) -> None:
     root = internal_state_root()
     code = _RUNTIME_CODE_ROOT
-    if path.is_relative_to(root) or path.is_relative_to(code):
+    if path.is_relative_to(root) or path.is_relative_to(code) or path == get_config_path().resolve():
         raise WorkspaceBoundaryError("Protected runtime state is not an agent workspace resource")
 
 
@@ -48,11 +48,18 @@ def protect_runtime_command(command: list[str]) -> list[str]:
                 "--unshare-pid", "--cap-drop", "ALL", "--bind", "/", "/",
                 "--proc", "/proc", "--dev", "/dev"]
         code = _RUNTIME_CODE_ROOT
-        ancestors = sorted(set(root.parents) | set(code.parents), key=lambda p: len(p.parts))
+        config_file = get_config_path().resolve()
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        # A missing configuration must not become a model-created authorization
+        # file. Trusted configuration loading already accepts an empty file.
+        if not config_file.exists():
+            config_file.touch(mode=0o600)
+        ancestors = sorted(set(root.parents) | set(code.parents) | set(config_file.parents), key=lambda p: len(p.parts))
         for ancestor in ancestors:
             if str(ancestor) != root.anchor:
                 args.extend(["--bind", str(ancestor), str(ancestor)])
         args.extend(["--ro-bind", str(code), str(code)])
+        args.extend(["--ro-bind", "/dev/null", str(config_file)])
         args.extend(["--tmpfs", str(root), "--remount-ro", str(root), "--", *command])
         return args
     if sys.platform == "darwin":
@@ -60,6 +67,7 @@ def protect_runtime_command(command: list[str]) -> list[str]:
         rules = ["(version 1)", "(allow default)",
                  f"(deny file-read* file-write* (subpath {quote_sandbox_path(str(root))}))",
                  f"(deny file-write* (subpath {quote_sandbox_path(str(_RUNTIME_CODE_ROOT))}))",
+                 f"(deny file-read* file-write* (literal {quote_sandbox_path(str(get_config_path().resolve()))}))",
                  "(deny process-info*)", "(deny signal (target others))"]
         rules.append("(deny file-write-unlink " + " ".join(
             f"(literal {quote_sandbox_path(str(p))})" for p in (root, *root.parents)) + ")")

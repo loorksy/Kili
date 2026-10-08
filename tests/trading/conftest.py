@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
@@ -22,7 +24,7 @@ def client(tmp_path):
         if path.endswith("specification"):
             return httpx.Response(200,json={"symbol":"GOLDm","digits":2,"minVolume":"0.01","maxVolume":"100","volumeStep":"0.01","tradeMode":"SYMBOL_TRADE_MODE_FULL"})
         if path.endswith("current-price"):
-            return httpx.Response(200,json={"symbol":"GOLDm","bid":"2701.10","ask":"2701.25","time":"2026-10-07T20:00:00Z"})
+            return httpx.Response(200,json={"symbol":"GOLDm","bid":"2701.10","ask":"2701.25","time":datetime.now(timezone.utc).isoformat()})
         return httpx.Response(200,json={"_id":"demo","state":"DEPLOYED","connectionStatus":"CONNECTED","region":"london"})
     return MetaApiClient(Connection(secret_ref="meta",account_id="demo"),secrets,transport=httpx.MockTransport(handler))
 

@@ -157,6 +157,7 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
     return MCPToolWrapper(session, "test", tool_def, tool_timeout=timeout)
@@ -293,6 +294,7 @@ async def test_registry_executes_mcp_tools_with_boolean_subschemas(
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {"value": value_schema}},
     )
     wrapper = MCPToolWrapper(session, "test", tool_def)
@@ -319,6 +321,7 @@ async def test_registry_preserves_mcp_type_union_arguments(types, value) -> None
     tool_def = SimpleNamespace(
         name="lookup",
         description="Look up an id without changing its type or value.",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {"id": {"type": types}},
@@ -340,6 +343,7 @@ def test_wrapper_preserves_non_nullable_unions() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -362,6 +366,7 @@ def test_wrapper_normalizes_nullable_property_type_union() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -379,6 +384,7 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -404,6 +410,7 @@ def test_wrapper_hoists_recursive_local_refs_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="search_dataset",
         description="search tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -437,6 +444,7 @@ def test_wrapper_hoists_root_self_ref_into_defs() -> None:
     tool_def = SimpleNamespace(
         name="tree",
         description="tree tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -459,6 +467,7 @@ def test_wrapper_preserves_existing_defs_refs() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "$defs": {"value": {"type": "string"}},
@@ -476,6 +485,7 @@ def test_wrapper_resolves_uri_encoded_json_pointer() -> None:
     tool_def = SimpleNamespace(
         name="demo",
         description="demo tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {
@@ -777,6 +787,7 @@ def _make_tool_def(name: str) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
         description=f"{name} tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
 
@@ -2011,6 +2022,7 @@ def test_tool_wrapper_sanitizes_name() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
@@ -2042,6 +2054,7 @@ def test_tool_wrapper_preserves_original_name_for_mcp_call() -> None:
     tool_def = SimpleNamespace(
         name="My Tool",
         description="tool with spaces",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
@@ -2120,11 +2133,13 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     tool_def = SimpleNamespace(
         name="search",
         description="search tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
     other_tool_def = SimpleNamespace(
         name="search",
         description="other search tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
     wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), server_name, tool_def)
@@ -2167,6 +2182,7 @@ async def test_optional_mcp_filters_reach_server_unchanged(params, error):
     wrapper = MCPToolWrapper(session, "linear", SimpleNamespace(
         name="list_issues",
         description="Search issues or use a saved view",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={
             "type": "object",
             "properties": {

@@ -945,6 +945,9 @@ def test_run_installed_cli_uses_argv_without_shell(
     )
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        # Assert application argv after the mandatory outer isolation wrapper.
+        if "--" in argv and "--die-with-parent" in argv:
+            argv = argv[argv.index("--") + 1:]
         assert "shell" not in kwargs or kwargs["shell"] is False
         assert kwargs["text"] is True
         assert kwargs["encoding"] == "utf-8"
@@ -987,6 +990,9 @@ def test_run_reports_created_artifacts(
     )
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        # Assert application argv after the mandatory outer isolation wrapper.
+        if "--" in argv and "--die-with-parent" in argv:
+            argv = argv[argv.index("--") + 1:]
         cwd = Path(str(kwargs["cwd"]))
         (cwd / "diagram.png").write_bytes(b"\x89PNG\r\n\x1a\nimage")
         return subprocess.CompletedProcess(argv, 0, stdout="done", stderr="")

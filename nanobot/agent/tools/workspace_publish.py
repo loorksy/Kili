@@ -41,11 +41,12 @@ class WorkspacePublishTool(Tool):
         if not request or request.responsibility_scope.closed:
             raise PermissionError("A live delegated execution is required")
         for execution in request.responsibility_scope.executions.values():
-            child = execution.store.assert_owner(execution.claim)
-            if child.delegation_id and child.parent_responsibility_id:
-                parent = execution.store.get(child.parent_responsibility_id)
-                if parent.execution_generation != child.parent_execution_generation:
-                    raise PermissionError("Parent execution was superseded")
-                return self.collaboration.publish(child.delegation_id, source, destination,
-                                                  expected_revision=expected_revision)
+            with execution.store.ownership(execution.claim) as child:
+                if child.delegation_id and child.parent_responsibility_id:
+                    parent = execution.store.get(child.parent_responsibility_id)
+                    if parent.execution_generation != child.parent_execution_generation:
+                        raise PermissionError("Parent execution was superseded")
+                    collaboration = WorkspaceCollaboration(execution.store.workspace)
+                    return collaboration.publish(child.delegation_id, source, destination,
+                                                 expected_revision=expected_revision)
         raise PermissionError("Publication requires a delegated worker identity")

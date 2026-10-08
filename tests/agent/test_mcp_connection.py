@@ -578,6 +578,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
             tool_def = SimpleNamespace(
                 name="quote",
                 description="quote tool",
+                annotations=SimpleNamespace(readOnlyHint=True),
                 inputSchema={"type": "object", "properties": {}},
             )
             registry.register(MCPToolWrapper(session, name, tool_def, tool_timeout=5))
@@ -634,6 +635,7 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
             tool_def = SimpleNamespace(
                 name="quote",
                 description="quote tool",
+                annotations=SimpleNamespace(readOnlyHint=True),
                 inputSchema={"type": "object", "properties": {}},
             )
             registry.register(MCPToolWrapper(_FakeSession(connect_count), name, tool_def))

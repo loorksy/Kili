@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ContextAware, current_request_context
-from nanobot.security.actions import Action, ActionPolicy, action_authorization
+from nanobot.security.actions import (
+    Action,
+    ActionPolicy,
+    ActionStore,
+    EffectOwner,
+    action_authorization,
+    current_authorized_action,
+)
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
@@ -225,7 +232,28 @@ class ToolRegistry:
             for execution in ctx.responsibility_scope.executions.values():
                 execution.store.assert_owner(execution.claim)
         with action_authorization(action):
-            return await tool.execute(**params)
+            if action.action_class != "consequential" or tool.manages_effects:
+                return await tool.execute(**params)
+            authorization = current_authorized_action()
+            if authorization is None or authorization.approval_id is None:
+                raise PermissionError("External mutation requires exact user approval")
+            store = self.policy.store or ActionStore()
+            effect = store.propose_effect(action, "approved:" + authorization.approval_id)
+            owner: EffectOwner | None = None
+            if ctx and ctx.responsibility_scope.executions:
+                execution = next(iter(ctx.responsibility_scope.executions.values()))
+                claim = execution.claim
+                owner = EffectOwner(workspace=str(execution.store.workspace), responsibility_id=claim.responsibility_id,
+                                    wake_id=claim.wake_id, generation=claim.generation, token=claim.token)
+            effect = store.start_effect(effect.id, approval_id=authorization.approval_id, owner=owner)
+            try:
+                result = await tool.execute(**params)
+            except BaseException:
+                store.finish_effect(effect, state="UNCERTAIN")
+                raise
+            # A tool error cannot establish that an outbound effect did not occur.
+            store.finish_effect(effect, state="UNCERTAIN" if is_tool_error_result(result) else "SUCCEEDED")
+            return result
 
     @property
     def tool_names(self) -> list[str]:

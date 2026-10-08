@@ -57,7 +57,66 @@ async def test_approved_simulated_execution_exact_binding_and_no_replay(tmp_path
         with pytest.raises(PermissionError):
             await executor.execute(preview.id,"websocket:main")
     assert executor.proposals.proposals.get(preview.proposal_id).status == "EXECUTED"
-    assert {entry.kind for entry in executor.journal.list()} == {"STARTED","SUCCEEDED"}
+    assert {entry.kind for entry in executor.journal.list()} == {"PROPOSED","PREVIEWED","STARTED","SUCCEEDED"}
+
+
+@pytest.mark.parametrize("operation,parameters,action_type", [
+    ("modify_position", {"stop_loss": Decimal("2600")}, "POSITION_MODIFY"),
+    ("modify_order", {"price": Decimal("2700")}, "ORDER_MODIFY"),
+    ("cancel_order", {}, "ORDER_CANCEL"),
+    ("close_position", {}, "POSITION_CLOSE_ID"),
+])
+async def test_modification_and_closure_require_their_exact_approval(tmp_path, client, operation, parameters, action_type):
+    proposals = await service_for(tmp_path, client)
+    proposal = proposals.create("websocket:main", TradeIntent(canonical_instrument="XAU-USD",
+        operation=operation, target_id="1", **parameters))
+    preview = await proposals.preview(proposal.id, proposal.principal)
+    executor = TradeExecutor(proposals, proposals.proposals.journal)
+    registry = ToolRegistry(ActionPolicy(executor.effects))
+    registry.register(TradeExecuteTool(executor))
+    original = client.transport
+    calls = []
+    def handler(request):
+        if request.method == "POST":
+            payload = json.loads(request.content)
+            calls.append(payload)
+            assert payload["actionType"] == action_type
+            assert payload.get("positionId", payload.get("orderId")) == "1"
+            return httpx.Response(200, json={"stringCode": "TRADE_RETCODE_DONE"})
+        return original.handler(request)
+    client.transport = httpx.MockTransport(handler)
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key="websocket:main")):
+        assert (await registry.execute("trade_execute", {"preview_id": preview.id})).is_error
+        assert not calls
+        approve(preview, executor.effects)
+        assert json.loads(await registry.execute("trade_execute", {"preview_id": preview.id}))["state"] == "SUCCEEDED"
+        assert len(calls) == 1
+
+
+async def test_restart_reconciliation_uses_existing_deadlines_and_never_resends(tmp_path, client):
+    from nanobot.trading.recovery import TradeRecovery
+    preview, executor, registry = await setup(tmp_path, client)
+    original = client.transport
+    calls = []
+    def handler(request):
+        if request.method == "POST":
+            calls.append(request)
+            raise httpx.ReadTimeout("interrupted", request=request)
+        if request.url.path.endswith("positions"):
+            return httpx.Response(200, json=[{"id": "resolved", "symbol": "GOLDm",
+                "type": "POSITION_TYPE_BUY", "volume": "0.1", "clientId": preview.broker_request["clientId"]}])
+        if "/history-orders/" in request.url.path:
+            return httpx.Response(200, json=[])
+        return original.handler(request)
+    client.transport = httpx.MockTransport(handler)
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key="websocket:main")):
+        approve(preview, executor.effects)
+        assert json.loads(await registry.execute("trade_execute", {"preview_id": preview.id}))["state"] == "UNCERTAIN"
+    recovery = TradeRecovery(executor, ResponsibilityStore(tmp_path))
+    assert recovery.nearest() is not None
+    await recovery.run_due()
+    assert executor.effects.find_effect(preview.effect_key).state == "SUCCEEDED"
+    assert recovery.nearest() is None and len(calls) == 1
 
 
 async def test_changed_preview_needs_new_approval(tmp_path,client):
@@ -175,3 +234,24 @@ asyncio.run(main())
     with request_context(RequestContext(channel="websocket",chat_id="main",session_key="websocket:main")):
         assert json.loads(await registry.execute("trade_execute",{"preview_id":preview.id}))["state"] == "UNCERTAIN"
     assert marker.read_text() == "sent once"
+
+
+async def test_rejected_history_order_is_not_success_and_unresolved_effect_blocks_new_preview(tmp_path, client):
+    preview, executor, registry = await setup(tmp_path, client)
+    transport = client.transport
+    def handler(request):
+        if request.method == "POST":
+            raise httpx.ReadTimeout("uncertain", request=request)
+        if request.url.path.endswith("positions") or request.url.path.endswith("orders"):
+            return httpx.Response(200, json=[])
+        if "/history-orders/" in request.url.path:
+            return httpx.Response(200, json=[{"id":"rejected", "symbol":"GOLDm", "type":"ORDER_TYPE_BUY", "volume":"0.1",
+                                            "state":"ORDER_STATE_REJECTED", "clientId":preview.broker_request["clientId"]}])
+        return transport.handler(request)
+    client.transport = httpx.MockTransport(handler)
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key="websocket:main")):
+        approve(preview, executor.effects)
+        effect = json.loads(await registry.execute("trade_execute", {"preview_id":preview.id}))
+        assert json.loads(await registry.execute("trade_reconcile", {"effect_id":effect["effect_id"]}))["state"] == "UNCERTAIN"
+        with pytest.raises(ValueError, match="existing|Existing|Reconcile"):
+            await executor.proposals.preview(preview.proposal_id, "websocket:main")

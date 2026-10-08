@@ -94,6 +94,7 @@ def _make_tool_def(name="test_tool"):
     return SimpleNamespace(
         name=name,
         description="A test tool",
+        annotations=SimpleNamespace(readOnlyHint=True),
         inputSchema={"type": "object", "properties": {}},
     )
 
@@ -491,3 +492,14 @@ async def test_prompt_reconnects_on_connection_closed_exception():
     assert output == "fresh prompt"
     assert old_session.get_prompt.call_count == 1
     assert new_session.get_prompt.call_count == 1
+
+
+async def test_mutating_mcp_tool_never_retries_unknown_outbound_result():
+    definition = _make_tool_def()
+    definition.annotations = SimpleNamespace(readOnlyHint=False)
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=_FakeClosedResourceError("sent then disconnected")))
+    tool = MCPToolWrapper(session, "broker", definition)
+    result = await tool.execute()
+    assert is_tool_error_result(result)
+    assert session.call_tool.await_count == 1
+    assert tool.action_class == "consequential"

@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 
 from filelock import FileLock
@@ -20,7 +22,12 @@ class WorkspaceCollaboration:
     def worker(self, worker_id: str) -> Path:
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", worker_id):
             raise ValueError("Invalid worker identity")
-        path = self.root / "workers" / worker_id
+        workers = self.root / "workers"
+        if workers.is_symlink():
+            raise PermissionError("Worker directory escaped its scope")
+        path = workers / worker_id
+        if path.is_symlink():
+            raise PermissionError("Worker directory escaped its scope")
         path.mkdir(parents=True, exist_ok=True)
         if not path.resolve().is_relative_to(self.root / "workers"):
             raise PermissionError("Worker directory escaped its scope")
@@ -30,37 +37,74 @@ class WorkspaceCollaboration:
     def revision(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "absent"
 
-    def publish(self, worker_id: str, source: str, destination: str, *, expected_revision: str) -> str:
-        private = self.worker(worker_id)
-        source_path = (private / source).resolve()
-        shared = self.root / "shared"
-        shared.mkdir(parents=True, exist_ok=True)
-        target = (shared / destination).resolve()
-        if not source_path.is_relative_to(private) or not target.is_relative_to(shared):
+    @staticmethod
+    def _parts(value: str) -> tuple[str, ...]:
+        path = Path(value)
+        if path.is_absolute() or not path.parts or any(part in {".", ".."} for part in path.parts):
             raise PermissionError("Publication path escaped its scope")
-        require_non_internal_path(source_path)
-        require_non_internal_path(target)
-        if source_path.stat().st_size > 2_000_000:
-            raise ValueError("Publication exceeds the artifact size limit")
+        return path.parts
+
+    @staticmethod
+    def _directory(stack: ExitStack, parent: int, parts: tuple[str, ...], *, create: bool) -> int:
+        current = parent
+        for part in parts:
+            if create:
+                try:
+                    os.mkdir(part, dir_fd=current)
+                except FileExistsError:
+                    pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+            stack.callback(os.close, child)
+            current = child
+        return current
+
+    def publish(self, worker_id: str, source: str, destination: str, *, expected_revision: str) -> str:
+        if os.name == "nt":
+            raise PermissionError("Protected publication requires directory-handle support")
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", worker_id):
+            raise ValueError("Invalid worker identity")
+        source_parts, target_parts = self._parts(source), self._parts(destination)
         namespace = hashlib.sha256(str(self.root).encode()).hexdigest()
         lock = FileLock(str(internal_state_root(create=True) / f"workspace-{namespace}.lock"))
-        with lock:
-            if self.revision(target) != expected_revision:
-                raise ValueError("Shared artifact changed; reload its revision")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-            try:
-                with temporary.open("xb") as stream:
-                    stream.write(source_path.read_bytes())
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, target)
-                if os.name != "nt":
-                    descriptor = os.open(target.parent, os.O_RDONLY)
+        try:
+            with lock, ExitStack() as stack:
+                anchor = os.open(self.root.anchor, os.O_RDONLY | os.O_DIRECTORY)
+                stack.callback(os.close, anchor)
+                root = self._directory(stack, anchor, self.root.parts[1:], create=False)
+                private = self._directory(stack, root, ("workers", worker_id), create=False)
+                source_dir = self._directory(stack, private, source_parts[:-1], create=False)
+                source_fd = os.open(source_parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=source_dir)
+                stack.callback(os.close, source_fd)
+                if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+                    raise PermissionError("Publication requires a regular artifact file")
+                with os.fdopen(os.dup(source_fd), "rb") as stream:
+                    content = stream.read(2_000_001)
+                if len(content) > 2_000_000:
+                    raise ValueError("Publication exceeds the artifact size limit")
+                shared = self._directory(stack, root, ("shared",), create=True)
+                target_dir = self._directory(stack, shared, target_parts[:-1], create=True)
+                try:
+                    fd = os.open(target_parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=target_dir)
+                    with os.fdopen(fd, "rb") as stream:
+                        current_revision = hashlib.sha256(stream.read(2_000_001)).hexdigest()
+                except FileNotFoundError:
+                    current_revision = "absent"
+                if current_revision != expected_revision:
+                    raise ValueError("Shared artifact changed; reload its revision")
+                temporary = ".publish-" + uuid.uuid4().hex
+                try:
+                    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=target_dir)
+                    with os.fdopen(fd, "wb") as stream:
+                        stream.write(content)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temporary, target_parts[-1], src_dir_fd=target_dir, dst_dir_fd=target_dir)
+                    os.fsync(target_dir)
+                finally:
                     try:
-                        os.fsync(descriptor)
-                    finally:
-                        os.close(descriptor)
-            finally:
-                temporary.unlink(missing_ok=True)
-            return self.revision(target)
+                        os.unlink(temporary, dir_fd=target_dir)
+                    except FileNotFoundError:
+                        pass
+                return hashlib.sha256(content).hexdigest()
+        except OSError:
+            raise PermissionError("Publication path is inaccessible or unsafe") from None

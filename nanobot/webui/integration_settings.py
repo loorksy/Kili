@@ -48,14 +48,16 @@ def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdat
     def change(config: Config) -> None:
         previous = getattr(config.tools.integrations, request.provider)
         reference = previous.secret_ref if isinstance(previous, Connection) else "connection_" + uuid.uuid4().hex
+        connection = Connection(secret_ref=reference, account_id=request.account_id,
+                                environment=request.environment, region=request.region)
         if request.token:
             SecretStore().put(reference, request.token.get_secret_value())
         elif not isinstance(previous, Connection):
             raise ValueError("A credential is required for a new connection")
-        connection = Connection(secret_ref=reference, account_id=request.account_id,
-                                environment=request.environment, region=request.region)
         setattr(config.tools.integrations, request.provider, connection)
         config.tools.integrations.charts_enabled = request.charts_enabled
+        from nanobot.security.financial_auth import require_financial_gateway_auth
+        require_financial_gateway_auth(config)
     settings.update(change)
     return {**integration_status(settings.load()), "restart_required": True}
 

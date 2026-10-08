@@ -5,6 +5,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from loguru import logger
 from pydantic import Field, JsonValue
 
 from nanobot.agent.tools.context import current_request_context
@@ -55,6 +56,8 @@ class TradeExecutor:
         self.journal = journal or RecordStore("trade_journal",TradeJournalEntry,self.effects)
 
     def record(self, preview: TradePreview, kind: str, effect: Effect | None = None) -> None:
+        logger.info("Trading transition kind={} proposal={} preview={} effect={} responsibility={}",
+                    kind, preview.proposal_id, preview.id, effect.id if effect else "none", preview.responsibility_id)
         identity = f"{preview.id}:{kind}:{effect.generation if effect else 0}"
         entry_id = "journal_" + hashlib.sha256(identity.encode()).hexdigest()
         try:
@@ -115,8 +118,9 @@ class TradeExecutor:
             self.effects.finish_effect(effect,state="UNCERTAIN")
             raise
         finished = self.effects.finish_effect(effect,state=state,result=result,provider_reference=reference)
-        self.record(preview,state,finished)
-        self._update_proposal(preview,finished)
+        with self.effects.owner_scope(finished.owner):
+            self.record(preview,state,finished)
+            self._update_proposal(preview,finished)
         return self.public_effect(finished)
 
     async def reconcile(self, effect_id: str, principal: str) -> dict[str, JsonValue]:
@@ -145,8 +149,12 @@ class TradeExecutor:
             end = datetime.now(timezone.utc) + timedelta(minutes=1)
             history = await self.proposals.client.history_orders(start.isoformat(),end.isoformat())
             client_id = preview.broker_request.get("clientId")
-            matches = {item.id:item for item in [*positions,*orders,*history]
+            expected_side = "BUY" if preview.intent.side == "buy" else "SELL"
+            candidates = [*positions, *orders, *[item for item in history
+                          if item.state in {"ORDER_STATE_FILLED", "ORDER_STATE_PARTIAL"}]]
+            matches = {item.id:item for item in candidates
                        if item.client_id == client_id and item.symbol == preview.broker_symbol
+                       and expected_side in item.type.split("_")
                        and (preview.intent.volume is None or item.volume == preview.intent.volume)}
             if len(matches) == 1 and preview.intent.operation == "open":
                 state, reference = "SUCCEEDED", next(iter(matches))
@@ -157,6 +165,7 @@ class TradeExecutor:
             raise
         finished = self.effects.finish_effect(claimed,state=state,provider_reference=reference,
             result={"message":"Provider evidence matched the client identity" if state == "SUCCEEDED" else "Ambiguous provider evidence; user attention required"})
-        self.record(preview,state,finished)
-        self._update_proposal(preview,finished)
+        with self.effects.owner_scope(finished.owner):
+            self.record(preview,state,finished)
+            self._update_proposal(preview,finished)
         return self.public_effect(finished)

@@ -50,7 +50,7 @@ async def test_mcp_reconnect_failure_obeys_private_log_policy(
     monkeypatch.setattr("mcp.client.stdio.stdio_client", broken_stdio)
     session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("session terminated")))
     wrapper = MCPToolWrapper(session, "sample", SimpleNamespace(
-        name="search", description="synthetic", inputSchema={},
+        name="search", description="synthetic", inputSchema={}, annotations=SimpleNamespace(readOnlyHint=True),
     ))
     registry = ToolRegistry()
     registry.register(wrapper)
