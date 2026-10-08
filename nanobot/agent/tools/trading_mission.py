@@ -59,7 +59,7 @@ class TradingMissionTool(Tool):
         connection = ctx.config.integrations.metaapi
         if connection is None:
             raise ValueError("Configure an account reference before creating a trading mission")
-        self.service = TradingMissions(MetaApiClient(connection),live_enabled=ctx.config.integrations.autonomous_trading_enabled)
+        self.service = TradingMissions(MetaApiClient(connection),live_enabled=not ctx.config.integrations.delegated_trading_blocked)
 
     @property
     def name(self) -> str:
@@ -73,7 +73,7 @@ class TradingMissionTool(Tool):
             "Capital is accounting allocation, not a segregated balance. Inspect account and market/chart evidence before planning. "
             "Plans may adapt or choose WAIT without raising limits. reduce only tightens existing authority. "
             "Supervision binds one exact protected position and cannot open unrelated entries. "
-            "SIMULATION never calls broker mutations; LIVE also requires the operator's enabled setting. "
+            "SIMULATION never calls broker mutations; LIVE requires exact user approval in chat and is blocked by operator emergency controls. "
             "resume/emergency_stop are user-only interactions. Use existing goal scheduling/watchers; no continuous inference.")
 
     @property

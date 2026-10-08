@@ -29,7 +29,7 @@ def service_for(config: Config, mandate_id: str | None = None, principal: str | 
             raise PermissionError("Trading mission belongs to another conversation")
         account_id = mandate.envelope.account_id
     connection = TradingAccounts(config.tools.integrations).connection(account_id, principal=principal)
-    return TradingMissions(MetaApiClient(connection),live_enabled=config.tools.integrations.autonomous_trading_enabled)
+    return TradingMissions(MetaApiClient(connection),live_enabled=not config.tools.integrations.delegated_trading_blocked)
 
 
 def mission_snapshot(service: TradingMissions, principal: str, mandate_id: str) -> dict[str, object]:

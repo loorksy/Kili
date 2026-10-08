@@ -24,7 +24,8 @@ class IntegrationsConfig(Base):
     metaapi_accounts: dict[str, Connection] = Field(default_factory=dict)
     default_metaapi_account: str | None = None
     charts_enabled: bool = False
-    autonomous_trading_enabled: bool = False
+    autonomous_trading_enabled: bool = False  # Legacy Settings state, not authority.
+    delegated_trading_blocked: bool = False  # Trusted operator kill switch; model cannot modify.
 
     @model_validator(mode="after")
     def normalize_accounts(self) -> IntegrationsConfig:

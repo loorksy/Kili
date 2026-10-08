@@ -204,6 +204,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.integrations.autonomy": "/api/settings/integrations/autonomy",
     "chart.update": "/api/webui/cloud-charts/update",
     "approval.resolve": "/api/webui/action-approvals/resolve",
+    "approval.edit": "/api/webui/action-approvals/edit",
     "mission.control": "/api/webui/trading-missions/control",
     "subagent.cancel": "/api/webui/subagents/cancel",
     "settings.agent.update": "/api/settings/update",
@@ -625,7 +626,7 @@ class GatewayHTTPHandler:
             return response
 
         if got in {"/api/webui/cloud-charts", "/api/webui/cloud-charts/candles",
-                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve",
+                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve", "/api/webui/action-approvals/edit",
                    "/api/webui/trading-missions", "/api/webui/trading-missions/control"}:
             return await self._handle_cloud_resource(request, got)
 
@@ -931,7 +932,7 @@ class GatewayHTTPHandler:
         }, extra_headers=_NO_STORE_HEADERS)
 
     async def _handle_integrations(self, request: WsRequest, path: str) -> Response:
-        from nanobot.market.oanda import ProviderUnavailableError
+        from nanobot.market.provider import ProviderUnavailableError
         from nanobot.trading.metaapi import ProviderRejectedError
         from nanobot.webui.integration_settings import (
             ConnectionUpdate,
@@ -965,7 +966,7 @@ class GatewayHTTPHandler:
             return _http_error(400, "Connection update could not be completed")
 
     async def _handle_cloud_resource(self, request: WsRequest, path: str) -> Response:
-        from nanobot.market.oanda import ProviderUnavailableError
+        from nanobot.market.provider import ProviderUnavailableError
         from nanobot.webui.cloud_resources import (
             chart_snapshot,
             list_charts,
@@ -1000,6 +1001,12 @@ class GatewayHTTPHandler:
                     result = await control_mission(service, MissionControl.model_validate(payload))
                 else:
                     result = mission_snapshot(service, principal, (query.get("mandate_id") or [""])[0])
+            elif path == "/api/webui/action-approvals/edit":
+                from nanobot.webui.trade_approval import LotApprovalEdit, edit_approval
+                if payload is None or not isinstance(payload.get("approval_id"), str) or not isinstance(payload.get("volume"), str):
+                    return _http_error(400, "Lot editing requires authenticated WebSocket and exact approval ID")
+                edit = LotApprovalEdit.model_validate(payload)
+                result = await edit_approval(self.settings.config.load(), principal, edit.approval_id, edit.volume)
             elif path.endswith("/resolve"):
                 if payload is None:
                     return _http_error(405, "Approval requires authenticated WebSocket")

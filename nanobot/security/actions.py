@@ -70,6 +70,7 @@ class Approval(BaseModel):
     resolved_at: int | None = None
     resolved_by: str | None = None
     resolution_queued: bool = False
+    replaced_by: str | None = None
 
 
 class EffectOwner(BaseModel):
@@ -209,6 +210,24 @@ class ActionStore:
                 reject_mandate_approval(db,record)
             return record
 
+    def replace_pending(self, approval_id: str, *, principal: str, action: Action) -> Approval:
+        """Authenticated editing atomically revokes old terms and creates pending terms."""
+        if action.principal != principal or action.tool != "trade_execute":
+            raise PermissionError("Invalid replacement authority")
+        with self.transaction() as db:
+            old = self._approval(db, approval_id)
+            if old.action.principal != principal:
+                raise PermissionError("Approval belongs to another conversation")
+            if old.status != "PENDING" or old.expires_at <= now_ms():
+                raise ValueError("Approval is no longer pending")
+            fresh = Approval(id="approval_" + uuid.uuid4().hex, action=action,
+                fingerprint=action.fingerprint, created_at=now_ms(), expires_at=now_ms() + 600_000)
+            old.status, old.resolved_by, old.resolved_at = "DENIED", principal, now_ms()
+            old.replaced_by, old.resolution_queued = fresh.id, True
+            db.execute("UPDATE approvals SET record=? WHERE id=?", (old.model_dump_json(), old.id))
+            db.execute("INSERT INTO approvals VALUES (?,?,?)", (fresh.id, fresh.fingerprint, fresh.model_dump_json()))
+            return fresh
+
     def pending_resolutions(self) -> list[Approval]:
         with self.transaction() as db:
             rows = db.execute("SELECT record FROM approvals").fetchall()
@@ -223,6 +242,14 @@ class ActionStore:
     def read_approval(self, approval_id: str, principal: str) -> dict[str, JsonValue]:
         with self.transaction() as db:
             approval = self._approval(db, approval_id)
+            for _ in range(100):
+                if approval.action.principal != principal:
+                    raise PermissionError("Approval belongs to another conversation")
+                if approval.replaced_by is None:
+                    break
+                approval = self._approval(db, approval.replaced_by)
+            else:
+                raise ValueError("Approval replacement chain exceeds limit")
         if approval.action.principal != principal:
             raise PermissionError("Approval belongs to another conversation")
         status = "EXPIRED" if approval.status == "PENDING" and approval.expires_at <= now_ms() else approval.status

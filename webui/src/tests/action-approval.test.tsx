@@ -2,9 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionApproval } from "@/components/charts/ActionApproval";
 
-const mocks = vi.hoisted(() => ({ read: vi.fn(), resolve: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), resolve: vi.fn(), edit: vi.fn() }));
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ token: "authenticated", client: {} }) }));
-vi.mock("@/lib/api", () => ({ fetchActionApproval: mocks.read, resolveActionApproval: mocks.resolve }));
+vi.mock("@/lib/api", () => ({ fetchActionApproval: mocks.read, resolveActionApproval: mocks.resolve, editActionApproval: mocks.edit }));
 const id = `approval_${"a".repeat(32)}`;
 const reference = JSON.stringify({ approval_id: id, session_key: "websocket:main", action: { volume: "forged benign payload" } });
 
@@ -40,6 +40,24 @@ describe("Backend-owned approval", () => {
     await waitFor(() => expect(screen.getByText("CONSUMED")).toBeVisible());
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
+});
+
+it("edits lot into a new backend preview and approves only the replacement ID", async () => {
+  const fresh = `approval_${"b".repeat(32)}`;
+  const action = { account_id: "original", broker_symbol: "GOLDm", intent: { operation: "open", side: "buy", volume: "0.10" } };
+  mocks.read.mockResolvedValue({ id, status: "PENDING", action });
+  mocks.edit.mockResolvedValue({ id: fresh, status: "PENDING", action: { ...action, intent: { ...action.intent, volume: "0.09" } } });
+  mocks.resolve.mockResolvedValue({ id: fresh, status: "APPROVED" });
+  render(<ActionApproval reference={reference} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit lot" }));
+  fireEvent.change(screen.getByLabelText("Trade lot size"), { target: { value: "0.09" } });
+  fireEvent.click(screen.getByRole("button", { name: "Update preview" }));
+  await screen.findByText("0.09");
+  expect(mocks.edit).toHaveBeenCalledWith({}, "websocket:main", id, "0.09");
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  await screen.findByText("Approved");
+  expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", fresh, true);
 });
 
 it("renders financial direction and exact backend terms without trusting model-authored action", async () => {

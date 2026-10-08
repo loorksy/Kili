@@ -2,13 +2,17 @@ import { useEffect, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
-import { fetchActionApproval, resolveActionApproval } from "@/lib/api";
+import { editActionApproval, fetchActionApproval, resolveActionApproval } from "@/lib/api";
+import { Input } from "@/components/ui/input";
 
 export function ActionApproval({ reference }: { reference: string }) {
   const { client, token } = useClient();
   const [status, setStatus] = useState("Loading approval…");
   const [action, setAction] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [replacement, setReplacement] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [lot, setLot] = useState("");
   let record: { approval_id: string; session_key: string } | null = null;
   try {
     const value = JSON.parse(reference);
@@ -20,7 +24,7 @@ export function ActionApproval({ reference }: { reference: string }) {
     if (!approvalId || !sessionKey) return;
     let active = true;
     void fetchActionApproval(token, sessionKey, approvalId).then(value => {
-      if (active) { setAction(value.action); setStatus(value.status === "PENDING" ? "Waiting for approval" : value.status); }
+      if (active) { setReplacement(value.id !== approvalId ? value.id : null); setAction(value.action); setStatus(value.status === "PENDING" ? "Waiting for approval" : value.status); }
     }).catch(() => { if (active) setStatus("Approval unavailable or expired"); });
     return () => { active = false; };
   }, [approvalId, sessionKey, token]);
@@ -28,9 +32,18 @@ export function ActionApproval({ reference }: { reference: string }) {
     if (!approvalId || !sessionKey || !action) return;
     setBusy(true);
     try {
-      const response = await resolveActionApproval(client, sessionKey, approvalId, approve);
+      const response = await resolveActionApproval(client, sessionKey, replacement ?? approvalId, approve);
       setStatus(response.status === "APPROVED" ? "Approved" : "Denied");
     } catch { setStatus("Approval unavailable or expired"); }
+    finally { setBusy(false); }
+  }
+  async function edit() {
+    if (!approvalId || !sessionKey || !lot) return;
+    setBusy(true);
+    try {
+      const response = await editActionApproval(client, sessionKey, replacement ?? approvalId, lot);
+      setReplacement(response.id); setAction(response.action); setStatus("Waiting for approval"); setEditing(false);
+    } catch { setStatus("Could not update lot size. Refresh the approval and check broker limits."); }
     finally { setBusy(false); }
   }
   if (!record) return <p>Invalid approval reference.</p>;
@@ -67,6 +80,12 @@ export function ActionApproval({ reference }: { reference: string }) {
     {status === "Waiting for approval" && action && <div className="flex gap-3">
       <Button size="sm" disabled={busy} onClick={() => void resolve(true)}>Approve</Button>
       <Button size="sm" variant="outline" disabled={busy} onClick={() => void resolve(false)}>Deny</Button>
+      {intent && ["open", "close_position"].includes(String(intent.operation)) && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setLot(String(intent.volume ?? "")); setEditing(true); }}>Edit lot</Button>}
+    </div>}
+    {editing && <div className="mt-3 flex flex-wrap gap-2">
+      <Input aria-label="Trade lot size" inputMode="decimal" value={lot} onChange={event => setLot(event.target.value)} className="max-w-40" />
+      <Button size="sm" disabled={busy || !lot} onClick={() => void edit()}>Update preview</Button>
+      <p className="w-full text-xs text-muted-foreground">Broker constraints are checked again. The old approval is revoked; approve the new exact preview.</p>
     </div>}
   </section>;
 }

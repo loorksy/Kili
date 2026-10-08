@@ -76,7 +76,7 @@ class TradeExecuteTool(Tool):
     def create(cls, ctx: ToolContext) -> TradeExecuteTool:
         accounts = TradingAccounts(ctx.config.integrations)
         return cls(TradeExecutor(TradeProposals(accounts.client()),
-            live_enabled=ctx.config.integrations.autonomous_trading_enabled), accounts)
+            live_enabled=not ctx.config.integrations.delegated_trading_blocked), accounts)
 
     def action_parameters(self, params: dict[str, Any]) -> dict[str, Any]:
         request = ExecuteRequest.model_validate(params)

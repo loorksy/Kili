@@ -14,7 +14,7 @@ describe("Existing connection settings with multiple broker accounts", () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.read.mockResolvedValue(status); mocks.save.mockResolvedValue(status); });
   it("edits an exact saved account without displaying its stored credential", async () => {
     render(<IntegrationSettings />);
-    fireEvent.change(screen.getByDisplayValue("OANDA"), { target: { value: "metaapi" } });
+    expect(screen.queryByRole("option", { name: "OANDA" })).not.toBeInTheDocument();
     await screen.findByRole("option", { name: "Research" });
     fireEvent.change(screen.getByLabelText("Saved broker account"), { target: { value: "second" } });
     expect(screen.getByLabelText("Connection account")).toHaveValue("second");
@@ -28,12 +28,13 @@ describe("Existing connection settings with multiple broker accounts", () => {
   });
   it("clears credential entry when switching accounts and binds symbol confirmation to the selected account", async () => {
     render(<IntegrationSettings />);
-    fireEvent.change(screen.getByDisplayValue("OANDA"), { target: { value: "metaapi" } });
+    expect(screen.queryByRole("option", { name: "OANDA" })).not.toBeInTheDocument();
     await screen.findByRole("option", { name: "Research" });
     fireEvent.change(screen.getByLabelText("Connection credential"), { target: { value: "temporary-secret" } });
     fireEvent.change(screen.getByLabelText("Saved broker account"), { target: { value: "second" } });
     expect(screen.getByLabelText("Connection credential")).toHaveValue("");
     fireEvent.change(screen.getByPlaceholderText("GOLD / XAUUSDm / …"), { target: { value: "GOLDm" } });
+    fireEvent.change(screen.getByLabelText("Canonical instrument"), { target: { value: "gold" } });
     mocks.map.mockResolvedValue({});
     fireEvent.click(screen.getByRole("button", { name: "Confirm and verify" }));
     await waitFor(() => expect(mocks.map).toHaveBeenCalledWith({}, expect.objectContaining({ account_id: "second", broker_symbol: "GOLDm" })));

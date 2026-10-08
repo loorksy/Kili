@@ -16,7 +16,7 @@ from nanobot.webui.settings_services import WebUISettingsConfig
 
 class ConnectionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    provider: Literal["oanda", "metaapi"]
+    provider: Literal["metaapi"]
     account_id: str
     token: SecretStr | None = None
     environment: Literal["practice", "live"] = "practice"
@@ -41,7 +41,7 @@ class AutonomyUpdate(BaseModel):
 def integration_status(config: Config) -> dict[str, object]:
     result: dict[str, object] = {"charts_enabled": config.tools.integrations.charts_enabled,
         "autonomous_trading_enabled":config.tools.integrations.autonomous_trading_enabled}
-    for provider in ("oanda", "metaapi"):
+    for provider in ("metaapi",):
         connection = getattr(config.tools.integrations, provider)
         if isinstance(connection, Connection):
             result[provider] = {"configured": True, "account_id": connection.account_id,
@@ -60,11 +60,7 @@ def integration_status(config: Config) -> dict[str, object]:
 
 def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdate) -> dict[str, object]:
     def change(config: Config) -> None:
-        previous = getattr(config.tools.integrations, request.provider)
-        if request.provider == "metaapi":
-            # Adding/selecting a profile must never overwrite another token or
-            # disable that account's already approved background mandates.
-            previous = config.tools.integrations.broker_accounts().get(request.account_id)
+        previous = config.tools.integrations.broker_accounts().get(request.account_id)
         reference = previous.secret_ref if isinstance(previous, Connection) else "connection_" + uuid.uuid4().hex
         connection = Connection(secret_ref=reference, account_id=request.account_id,
                                 environment=request.environment, region=request.region, name=request.name)
@@ -72,15 +68,12 @@ def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdat
             SecretStore().put(reference, request.token.get_secret_value())
         elif not isinstance(previous, Connection):
             raise ValueError("A credential is required for a new connection")
-        if request.provider == "metaapi":
-            accounts = config.tools.integrations.broker_accounts()
-            accounts[request.account_id] = connection
-            config.tools.integrations.metaapi_accounts = accounts
-            if request.make_default or config.tools.integrations.metaapi is None:
-                config.tools.integrations.metaapi = connection
-                config.tools.integrations.default_metaapi_account = request.account_id
-        else:
-            config.tools.integrations.oanda = connection
+        accounts = config.tools.integrations.broker_accounts()
+        accounts[request.account_id] = connection
+        config.tools.integrations.metaapi_accounts = accounts
+        if request.make_default or config.tools.integrations.metaapi is None:
+            config.tools.integrations.metaapi = connection
+            config.tools.integrations.default_metaapi_account = request.account_id
         config.tools.integrations.charts_enabled = request.charts_enabled
         from nanobot.security.financial_auth import require_financial_gateway_auth
         require_financial_gateway_auth(config)
@@ -100,6 +93,7 @@ def configure_autonomy(settings: WebUISettingsConfig, request: AutonomyUpdate) -
         if request.enabled and config.tools.integrations.metaapi is None:
             raise ValueError("Connect MetaApi before enabling delegated live trading")
         config.tools.integrations.autonomous_trading_enabled = request.enabled
+        config.tools.integrations.delegated_trading_blocked = not request.enabled
         from nanobot.security.financial_auth import require_financial_gateway_auth
         require_financial_gateway_auth(config)
     settings.update(change)

@@ -1375,6 +1375,9 @@ export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: 
 export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean) {
   return mutation<{ id: string; status: string }>(transport, "approval.resolve", { session_key: sessionKey, approval_id: approvalId, approve });
 }
+export function editActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, volume: string) {
+  return mutation<{ id: string; status: string; action: Record<string, unknown> }>(transport, "approval.edit", { session_key: sessionKey, approval_id: approvalId, volume });
+}
 
 export interface IntegrationStatus {
   charts_enabled: boolean;
@@ -1431,6 +1434,6 @@ export function configureAutonomousTrading(transport: WebUIMutationTransport, en
 }
 
 export function listCloudCharts(token: string, sessionKey: string) {
-  return request<{ charts: (import("@/components/charts/contract").ChartReference & { instrument: string; timeframe: string })[]; instruments: { name: string; display_name: string }[]; market_unavailable: boolean }>(
+  return request<{ charts: (import("@/components/charts/contract").ChartReference & { instrument: string; provider_instrument?: string; timeframe: string })[]; instruments: { name: string; display_name: string; canonical_instrument?: string; account_id?: string }[]; market_unavailable: boolean }>(
     `/api/webui/cloud-charts?session_key=${encodeURIComponent(sessionKey)}`, token);
 }
