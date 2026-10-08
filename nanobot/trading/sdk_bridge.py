@@ -21,7 +21,7 @@ from nanobot.market.models import Connection
 from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import current_authorized_action
 from nanobot.security.runtime_storage import internal_state_root
-from nanobot.security.secrets import SecretStore
+from nanobot.security.secrets import SecretStore, SecretValue
 
 SDK_VERSION = "29.1.1"
 
@@ -51,6 +51,14 @@ class SDKBridge:
         self._pending: asyncio.Future[SDKReply] | None = None
         self._consumers: dict[int, tuple[set[str], asyncio.Queue[dict[str, JsonValue] | None]]] = {}
         self._next_consumer = 0
+        self._credential: SecretValue | None = None
+
+    def _redact(self, payload: object) -> object:
+        # A running connector may still use the bootstrap credential after a
+        # user rotates its reference. Scrub both values until it is restarted.
+        if self._credential is not None:
+            payload = self._credential.redact(payload)
+        return self.secrets.resolve(self.connection.secret_ref).redact(payload)
 
     @staticmethod
     def _offer(queue: asyncio.Queue[dict[str, JsonValue] | None], value: dict[str, JsonValue] | None) -> None:
@@ -70,7 +78,7 @@ class SDKBridge:
                         self._offer(queue, None)
                 elif frame.kind == "prices":
                     cleaned = TypeAdapter[list[dict[str, JsonValue]]](list[dict[str, JsonValue]]).validate_python(
-                        self.secrets.resolve(self.connection.secret_ref).redact(frame.prices))
+                        self._redact(frame.prices))
                     for symbols, queue in self._consumers.values():
                         updates: dict[str, JsonValue] = {str(price["symbol"]): price for price in cleaned
                                                        if price.get("symbol") in symbols}
@@ -105,6 +113,7 @@ class SDKBridge:
             }},
         )
         token = self.secrets.resolve(self.connection.secret_ref)
+        self._credential = token
         assert self._process.stdin is not None
         self._process.stdin.write((json.dumps({"account_id": self.connection.account_id,
                                                "region": self.connection.region,
@@ -135,7 +144,7 @@ class SDKBridge:
                     if reply.error == "rejected":
                         raise SDKRejectedError("MetaApi rejected the requested operation")
                     raise ProviderUnavailableError("MetaApi SDK account operation unavailable; verify deployment and synchronization")
-                return TypeAdapter[JsonValue](JsonValue).validate_python(self.secrets.resolve(self.connection.secret_ref).redact(reply.data))
+                return TypeAdapter[JsonValue](JsonValue).validate_python(self._redact(reply.data))
             except (OSError, ValueError, asyncio.TimeoutError, asyncio.CancelledError, ProviderUnavailableError) as exc:
                 # Cancellation after sending is uncertain too. Never replay a
                 # financial request or leave unread replies in the IPC stream.

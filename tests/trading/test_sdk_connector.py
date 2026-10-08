@@ -315,3 +315,14 @@ async def test_sdk_process_death_after_outbound_trade_is_uncertain_and_never_rep
         assert executor.effects.find_effect(preview.effect_key).state == "UNCERTAIN"
     finally:
         await bridge.close()
+
+
+def test_rotated_secret_reference_also_redacts_running_connector_bootstrap(tmp_path):
+    from nanobot.security.secrets import SecretStore
+    store = SecretStore(tmp_path / "secrets")
+    store.put("rotated", "old-bootstrap-sentinel")
+    bridge = SDKBridge(Connection(secret_ref="rotated", account_id="a"), store)
+    bridge._credential = store.resolve("rotated")
+    store.put("rotated", "new-credential-sentinel")
+    result = bridge._redact({"old": "old-bootstrap-sentinel", "new": "new-credential-sentinel"})
+    assert result == {"old": "[redacted]", "new": "[redacted]"}
