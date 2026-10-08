@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useClient } from "@/providers/ClientProvider";
-import { configureIntegration, configureInstrumentMapping, fetchIntegrationSettings, type IntegrationStatus } from "@/lib/api";
+import { configureAutonomousTrading, configureIntegration, configureInstrumentMapping, fetchIntegrationSettings, type IntegrationStatus } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
@@ -53,6 +53,15 @@ export function IntegrationSettings() {
         : <SettingsRow title="Environment"><select value={environment} onChange={e => setEnvironment(e.target.value)}><option value="practice">Practice</option><option value="live">Live data</option></select></SettingsRow>}
       <SettingsRow title="Save connection"><Button disabled={busy || !account} onClick={() => void save()}>Save connection</Button></SettingsRow>
       {status?.metaapi?.configured && <>
+        <SettingsRow title="Delegated live trading" description="Disabled by default. Enabling permits only explicitly approved bounded mandates. Restart after enabling; disabling freezes existing new-risk authority.">
+          <Button disabled={busy} onClick={() => {
+            setBusy(true);
+            void configureAutonomousTrading(client, !status.autonomous_trading_enabled)
+              .then(value => { setStatus(value); setNotice("Saved. Restart the gateway after enabling."); })
+              .catch(() => setNotice("Could not change delegated trading setting."))
+              .finally(() => setBusy(false));
+          }}>{status.autonomous_trading_enabled ? "Disable delegated live trading" : "Enable delegated live trading"}</Button>
+        </SettingsRow>
         <SettingsRow title="Canonical instrument"><Input value={canonical} onChange={e => setCanonical(e.target.value)} /></SettingsRow>
         <SettingsRow title="Exact broker symbol"><Input value={symbol} onChange={e => setSymbol(e.target.value)} placeholder="GOLD / XAUUSDm / …" /></SettingsRow>
         <SettingsRow title="Verify mapping" description="Confirm that this broker symbol represents the intended instrument."><Button disabled={busy || !symbol || !canonical} onClick={() => void map()}>Confirm and verify</Button></SettingsRow>

@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 
 import "streamdown/styles.css";
 const LazyActionApproval = lazy(() => import("@/components/charts/ActionApproval").then(module => ({ default: module.ActionApproval })));
+const LazyTradingMission = lazy(() => import("@/components/charts/TradingMission").then(module => ({ default: module.TradingMission })));
 const LazyCloudChart = lazy(() => import("@/components/charts/CloudChart").then(module => ({ default: module.CloudChart })));
 
 interface MarkdownTextRendererProps {
@@ -567,6 +568,7 @@ export default function MarkdownTextRenderer({
           if (match[1] === "action_approval") {
             return <Suspense fallback={<p>Loading approval…</p>}><LazyActionApproval reference={code} /></Suspense>;
           }
+          if (match[1] === "trading_mission") return <Suspense fallback={<p>Loading mission…</p>}><LazyTradingMission reference={code} /></Suspense>;
           if (match[1] === "trading_chart") {
             return <Suspense fallback={<p>Loading chart…</p>}><LazyCloudChart reference={code} /></Suspense>;
           }
@@ -628,6 +630,7 @@ export default function MarkdownTextRenderer({
         if (fence) {
           if (fence.language === "trading_chart") return <Suspense fallback={<p>Loading chart…</p>}><LazyCloudChart reference={fence.code} /></Suspense>;
           if (fence.language === "action_approval") return <Suspense fallback={<p>Loading approval…</p>}><LazyActionApproval reference={fence.code} /></Suspense>;
+          if (fence.language === "trading_mission") return <Suspense fallback={<p>Loading mission…</p>}><LazyTradingMission reference={fence.code} /></Suspense>;
           return (
             <CodeBlock
               language={fence.language || "text"}

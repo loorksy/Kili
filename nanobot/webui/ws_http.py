@@ -201,8 +201,10 @@ _WEBUI_MUTATION_PATHS = {
     "recovery.dismiss": "/api/webui/recovery/dismiss",
     "settings.integrations.configure": "/api/settings/integrations/configure",
     "settings.integrations.map": "/api/settings/integrations/map",
+    "settings.integrations.autonomy": "/api/settings/integrations/autonomy",
     "chart.update": "/api/webui/cloud-charts/update",
     "approval.resolve": "/api/webui/action-approvals/resolve",
+    "mission.control": "/api/webui/trading-missions/control",
     "subagent.cancel": "/api/webui/subagents/cancel",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
@@ -614,7 +616,7 @@ class GatewayHTTPHandler:
         if got == "/webui/terminal":
             return self._handle_bootstrap(connection, request, terminal_probe=True)
 
-        if got in {"/api/settings/integrations", "/api/settings/integrations/configure", "/api/settings/integrations/map"}:
+        if got in {"/api/settings/integrations", "/api/settings/integrations/configure", "/api/settings/integrations/map", "/api/settings/integrations/autonomy"}:
             return await self._handle_integrations(request, got)
 
         # Settings routes (delegated)
@@ -623,7 +625,8 @@ class GatewayHTTPHandler:
             return response
 
         if got in {"/api/webui/cloud-charts", "/api/webui/cloud-charts/candles",
-                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve"}:
+                   "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve",
+                   "/api/webui/trading-missions", "/api/webui/trading-missions/control"}:
             return await self._handle_cloud_resource(request, got)
 
         # Recovery routes
@@ -949,6 +952,12 @@ class GatewayHTTPHandler:
                     return _http_error(405, "Settings changes require authenticated WebSocket")
                 if path.endswith("/configure"):
                     result = configure_connection(self.settings.config, ConnectionUpdate.model_validate(payload))
+                elif path.endswith("/autonomy"):
+                    from nanobot.webui.integration_settings import (
+                        AutonomyUpdate,
+                        configure_autonomy,
+                    )
+                    result = configure_autonomy(self.settings.config, AutonomyUpdate.model_validate(payload))
                 else:
                     result = await configure_mapping(self.settings.config.load(), MappingUpdate.model_validate(payload))
             return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
@@ -969,7 +978,21 @@ class GatewayHTTPHandler:
         if self.session_manager is None or self.session_manager.get_existing(principal) is None:
             return _http_error(404, "Conversation unavailable")
         try:
-            if path.endswith("/resolve"):
+            if path.startswith("/api/webui/trading-missions"):
+                from nanobot.webui.mission_resources import (
+                    MissionControl,
+                    control_mission,
+                    mission_snapshot,
+                    service_for,
+                )
+                service = service_for(self.settings.config.load())
+                if path.endswith("/control"):
+                    if payload is None:
+                        return _http_error(405, "Mission changes require authenticated WebSocket")
+                    result = await control_mission(service, MissionControl.model_validate(payload))
+                else:
+                    result = mission_snapshot(service, principal, (query.get("mandate_id") or [""])[0])
+            elif path.endswith("/resolve"):
                 if payload is None:
                     return _http_error(405, "Approval requires authenticated WebSocket")
                 approval_id, approve = payload.get("approval_id"), payload.get("approve")

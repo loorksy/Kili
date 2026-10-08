@@ -1374,6 +1374,7 @@ export function resolveActionApproval(transport: WebUIMutationTransport, session
 
 export interface IntegrationStatus {
   charts_enabled: boolean;
+  autonomous_trading_enabled?: boolean;
   oanda: { configured: boolean; account_id?: string; environment?: string };
   metaapi: { configured: boolean; account_id?: string; region?: string };
   restart_required?: boolean;
@@ -1391,4 +1392,35 @@ export function configureInstrumentMapping(transport: WebUIMutationTransport, va
 export function fetchActionApproval(token: string, sessionKey: string, approvalId: string) {
   const query = new URLSearchParams({ session_key: sessionKey, approval_id: approvalId });
   return request<{ id: string; status: string; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
+}
+
+export interface TradingMissionState {
+  id: string;
+  status: string;
+  mode: "SIMULATION" | "LIVE";
+  goal: string;
+  target_profit: string | null;
+  currency: string;
+  envelope: Record<string, unknown>;
+  realized_pnl: string;
+  unrealized_pnl: string;
+  pnl_complete: boolean;
+  remaining_loss: string;
+  reserved_risk: string;
+  attention_reason: string;
+  plan_version: number;
+  monitoring_summary: string;
+  approved: boolean;
+  expires_at: number;
+}
+export function fetchTradingMission(token: string, sessionKey: string, mandateId: string) {
+  const query = new URLSearchParams({ session_key: sessionKey, mandate_id: mandateId });
+  return request<TradingMissionState>(`/api/webui/trading-missions?${query}`, token);
+}
+export function controlTradingMission(transport: WebUIMutationTransport, sessionKey: string, mandateId: string,
+  operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop") {
+  return mutation<TradingMissionState>(transport, "mission.control", { session_key: sessionKey, mandate_id: mandateId, operation });
+}
+export function configureAutonomousTrading(transport: WebUIMutationTransport, enabled: boolean) {
+  return mutation<IntegrationStatus>(transport, "settings.integrations.autonomy", { enabled });
 }

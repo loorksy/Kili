@@ -30,8 +30,14 @@ class MappingUpdate(BaseModel):
     broker_symbol: str
 
 
+class AutonomyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
 def integration_status(config: Config) -> dict[str, object]:
-    result: dict[str, object] = {"charts_enabled": config.tools.integrations.charts_enabled}
+    result: dict[str, object] = {"charts_enabled": config.tools.integrations.charts_enabled,
+        "autonomous_trading_enabled":config.tools.integrations.autonomous_trading_enabled}
     for provider in ("oanda", "metaapi"):
         connection = getattr(config.tools.integrations, provider)
         if isinstance(connection, Connection):
@@ -68,3 +74,21 @@ async def configure_mapping(config: Config, request: MappingUpdate) -> dict[str,
         raise ValueError("MetaApi connection is not configured")
     record = await InstrumentMappings().verify_user_mapping(MetaApiClient(connection), request.instrument, request.broker_symbol)
     return record.model_dump(mode="json")
+
+
+def configure_autonomy(settings: WebUISettingsConfig, request: AutonomyUpdate) -> dict[str, object]:
+    def change(config: Config) -> None:
+        if request.enabled and config.tools.integrations.metaapi is None:
+            raise ValueError("Connect MetaApi before enabling delegated live trading")
+        config.tools.integrations.autonomous_trading_enabled = request.enabled
+        from nanobot.security.financial_auth import require_financial_gateway_auth
+        require_financial_gateway_auth(config)
+    settings.update(change)
+    if not request.enabled:
+        from nanobot.session.records import RecordStore
+        from nanobot.trading.mission_models import AccountGuardrails
+        guards = RecordStore("account_guardrails",AccountGuardrails)
+        for guard in guards.list():
+            guard.enabled = False
+            guards.save(guard)
+    return {**integration_status(settings.load()),"restart_required":True}
