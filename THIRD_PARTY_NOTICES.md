@@ -415,9 +415,13 @@ LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
-Pillow is used for chart-only PNG rendering (HPND and compatible licenses);
-its distribution retains the upstream license notices. No browser engine,
-computer runtime or model-generated executable code is bundled.
+Chart PNG export uses the same pinned Apache-2.0 KLineChart Pro/KLineChart
+adapter in an offline render-only document. Playwright 1.63.0 (Copyright
+Microsoft Corporation, Apache-2.0, license above) drives only this trusted
+document. Chromium is an operator-installed system dependency, not bundled.
+No browser/computer tool or model-generated executable code is exposed.
+The Pro bundle includes SolidJS, Copyright (c) 2016-present Ryan Carniato,
+MIT license (permission and disclaimer as in the project MIT LICENSE).
 
 The existing build-time chart adapter also transforms only the KLineChart
 9.8.12 ESM `BarSpaceLimitConstants.MIN/MAX` from `1/50` to `0.01/10000`.

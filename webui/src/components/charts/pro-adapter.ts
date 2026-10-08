@@ -8,14 +8,14 @@ const recentActions = new WeakMap<HTMLElement, CustomEvent>();
 
 export interface DrawingEdit { id?: string; object_revision?: number; name: string; points: { timestamp: number; value: string }[] }
 export interface ChartInteraction { selectedTool?: string; onDrawing?: (drawing: DrawingEdit) => void; onCrosshair?: (point?: { timestamp: number; value: string; pane: string }) => void }
-export type ChartMount = (() => void) & { viewport?: () => { count: number; before: string } | undefined };
+export type ChartMount = (() => void) & { ready: Promise<void>; picture: () => string; viewport?: () => { count: number; before: string } | undefined };
 export function mountCloudChart(container: HTMLElement, state: CloudChartState, datafeed: Datafeed, interaction: ChartInteraction = {}): ChartMount {
   const calendar: Record<string, [number, string]> = { D: [1, "day"], W: [1, "week"], M: [1, "month"] };
   const unit = /^([SMH])(\d+)$/.exec(state.timeframe);
   const units: Record<string, string> = { S: "second", M: "minute", H: "hour" };
   const [multiplier, timespan] = calendar[state.timeframe] ?? (unit ? [Number(unit[2]), units[unit[1]]] : [1, "hour"]);
   const period = { multiplier, timespan, text: state.timeframe };
-  const pro = new KLineChartPro({ container, symbol: { ticker: state.provider_instrument, name: state.canonical_instrument },
+  const pro = new KLineChartPro({ container, symbol: { ticker: state.provider_instrument, name: state.provider_instrument },
     period, periods: [period], timezone: "UTC", locale: "en-US", mainIndicators: state.studies.filter(name => ["MA", "EMA", "BOLL", "SAR"].includes(name)), subIndicators: state.studies.filter(name => !["MA", "EMA", "BOLL", "SAR"].includes(name)),
     drawingBarVisible: false, datafeed: { ...datafeed, getHistoryKLineData: async (...args) => {
       const data = await datafeed.getHistoryKLineData(...args);
@@ -30,6 +30,8 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
       return data;
     } } });
   let disposed = false;
+  let rendered: (() => void) | undefined;
+  const ready = new Promise<void>(resolve => { rendered = resolve; });
   let lastCrosshair = 0;
   const crosshair = (value: unknown) => {
     if (!value || typeof value !== "object" || !("x" in value) || !("y" in value) || typeof value.x !== "number" || typeof value.y !== "number") { interaction.onCrosshair?.(); return; }
@@ -52,6 +54,7 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     if (disposed) return;
     const core = getCore();
     if (!core) return;
+    core.setStyles({ overlay: { text: { family: "NanobotChart, Arial, sans-serif" } } });
     core.subscribeAction(ActionType.OnCrosshairChange, crosshair);
     core.setOffsetRightDistance(state.right_spacing ?? 40);
     if (!state.visible_range) core.setBarSpace(Math.max(1, (core.getSize("candle_pane", DomPosition.Main)?.width ?? container.clientWidth) - (state.right_spacing ?? 40)) / (state.candle_count ?? 200));
@@ -82,9 +85,18 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
       if (annotation.visible === false) continue;
       const names: Record<string, string> = { horizontal_line: "horizontalStraightLine", trend_line: "segment", price_zone: "rect", marker: "simpleAnnotation", note: "simpleAnnotation", entry: "simpleTag", stop: "simpleTag", target: "simpleTag" };
       core.createOverlay({ id: annotation.id, name: annotation.library_name ?? names[annotation.type] ?? "horizontalStraightLine", lock: annotation.locked ?? true,
-        points: annotation.points.map(point => ({ timestamp: point.timestamp ?? Date.now(), value: Number(point.value) })),
+        points: annotation.points.map(point => ({ timestamp: point.timestamp ?? core.getDataList().at(-1)?.timestamp ?? 0, value: Number(point.value) })),
         extendData: annotation.text, onPressedMoveEnd: ({ overlay }) => { saveDrawing(overlay, annotation.id, annotation.revision); return true; } });
+      if (annotation.text && !["simpleAnnotation", "simpleTag"].includes(annotation.library_name ?? names[annotation.type])) {
+        // Native line/zone overlays do not render extendData text. Project a
+        // locked companion label; it is a view of this same durable object.
+        const anchor = annotation.points[0];
+        core.createOverlay({ id: `${annotation.id}_label`, name: "simpleAnnotation", lock: true,
+          points: [{ timestamp: anchor.timestamp ?? core.getDataList().at(-1)?.timestamp ?? 0, value: Number(anchor.value) }],
+          extendData: annotation.text });
+      }
     }
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => rendered?.()));
   }, 0);
   const cursor = document.createElement("div");
   cursor.textContent = "➤ Nanobot";
@@ -125,7 +137,11 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     pro.destroy();
     container.replaceChildren();
   };
-  return Object.assign(dispose, { viewport: () => {
+  return Object.assign(dispose, { ready, picture: () => {
+    const core = getCore();
+    if (!core || disposed) throw new Error("Chart is unavailable for export");
+    return core.getConvertPictureUrl(true, "png", "#0f172a");
+  }, viewport: () => {
     const core = getCore();
     if (!core) return undefined;
     const data = core.getDataList();

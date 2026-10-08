@@ -39,7 +39,7 @@ class ChartSnapshotTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Inspect or export the current cloud chart. When the user asks for a chart picture, use format=attachment: it saves a PNG and returns artifact paths; call message with those paths in media to actually send the picture. This works without a vision model or image-generation provider. Use format=image for internal vision inspection only, or structured for exact metadata. Renders cached chart data, drawings and indicators without a browser; complex curves use labeled anchor previews."
+        return "Inspect or export the current KLineChart Pro cloud chart. When the user asks for a chart picture, use format=attachment: it saves a PNG and returns artifact paths; call message with those paths in media to send it. No vision model or image-generation provider is needed. Use format=image for internal vision inspection or structured for exact metadata. The isolated chart-only exporter has no browsing or network access."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -66,7 +66,7 @@ class ChartSnapshotTool(Tool):
                 store_generated_image_artifact,
                 "data:image/png;base64," + base64.b64encode(raw).decode("ascii"),
                 prompt=f"Chart snapshot: {chart.canonical_instrument} / {chart.timeframe}; chart {chart.id}; revision {chart.revision}",
-                model="chart-rasterizer", provider="nanobot", save_dir="charts",
+                model="klinechart-pro-export", provider="nanobot", save_dir="charts",
             )
             return generated_image_tool_result([artifact])
         return build_image_content_blocks(raw, "image/png", "", json.dumps(scene.metadata()))

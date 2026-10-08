@@ -3,7 +3,7 @@ import { mountCloudChart } from "@/components/charts/pro-adapter";
 import type { CloudChartState } from "@/components/charts/contract";
 import type { Datafeed } from "@klinecharts/pro";
 
-const mocks = vi.hoisted(() => ({ core: { getSize: vi.fn(() => ({ width: 800 })), scrollByDistance: vi.fn(), scrollToTimestamp: vi.fn(), setOffsetRightDistance: vi.fn(), setBarSpace: vi.fn(),
+const mocks = vi.hoisted(() => ({ core: { setStyles: vi.fn(), getSize: vi.fn(() => ({ width: 800 })), scrollByDistance: vi.fn(), scrollToTimestamp: vi.fn(), setOffsetRightDistance: vi.fn(), setBarSpace: vi.fn(),
   subscribeAction: vi.fn(), unsubscribeAction: vi.fn(), convertFromPixel: vi.fn(() => [{ timestamp: 1000, value: 2700 }]), createOverlay: vi.fn(), createIndicator: vi.fn(), getVisibleRange: vi.fn(() => ({ from: 0, to: 2 })), getDataList: vi.fn(() => [{ timestamp: 1000 }, { timestamp: 2000 }]),
   convertToPixel: vi.fn(() => ({ x: 50, y: 80 })) }, destroy: vi.fn(), register: vi.fn() }));
 vi.mock("@klinecharts/pro", () => ({ KLineChartPro: class {

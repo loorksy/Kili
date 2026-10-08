@@ -87,7 +87,4 @@ def build_scene(chart: CloudChart, actor: ChartActor, registry: IndicatorRegistr
                     offset = int(raw_offset)
                 scene.series.append(SceneSeries(instance_id=instance.id, name=output.name, kind=output.kind,
                     pane=instance.pane, color=output.color, values=[calculated[output.name][i + offset] if i + offset < len(data) else None for i in indexes]))
-    approximate = sorted({a.library_name for a in view.annotations if a.visible and a.library_name and a.library_name not in {"horizontalStraightLine", "priceLine", "verticalStraightLine", "segment", "rect", "simpleAnnotation", "simpleTag", "fibonacciLine"}})
-    if approximate:
-        scene.warnings.append("Raster view uses semantic anchor previews for: " + ", ".join(approximate))
     return scene

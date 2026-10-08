@@ -23,6 +23,7 @@ license-files = [
 ]
 
 dependencies = [
+    "playwright==1.63.0",  # Chart-only offline KLineChart Pro PNG export.
     "Pillow>=12.0,<13",
     "typer>=0.20.0,<1.0.0",
     "anthropic>=0.100.0,<1.0.0",
@@ -133,6 +134,8 @@ allow-direct-references = true
 include = [
     "nanobot/**/*.py",
     "nanobot/charts/assets/*.cjs",
+    "nanobot/charts/assets/*.js",
+    "nanobot/charts/assets/*.css",
     "nanobot/charts/assets/*.sha256",
     "nanobot/charts/assets/*.ttf",
     "nanobot/charts/assets/*LICENSE.txt",

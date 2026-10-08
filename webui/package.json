@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build:chart-renderer": "vite build --config chart-renderer.config.ts && node scripts/hash-chart-renderer.mjs",
     "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
     "test": "vitest run",
