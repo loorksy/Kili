@@ -114,6 +114,9 @@ class CloudChartWirePayload(TypedDict):
     chart_id: str
     revision: int
     annotations_revision: int
+    operation: NotRequired[str | None]
+    anchors: NotRequired[list[list[int | str]]]
+    occurred_at: NotRequired[int]
 
 
 WebUIWirePayload: TypeAlias = (

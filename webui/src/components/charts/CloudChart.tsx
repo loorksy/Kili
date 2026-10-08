@@ -12,6 +12,7 @@ export function CloudChart({ reference }: { reference: string }) {
   const { client, token } = useClient();
   const [chart, setChart] = useState<CloudChartState | null>(null);
   const [error, setError] = useState("");
+  const [drawingTool, setDrawingTool] = useState("");
   const [price, setPrice] = useState("");
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -35,7 +36,7 @@ export function CloudChart({ reference }: { reference: string }) {
     const feed: Datafeed = {
       searchSymbols: async () => [{ ticker: chart.provider_instrument, name: chart.canonical_instrument }],
       getHistoryKLineData: async (_symbol, _period, _from, to) => {
-        const page = await fetchChartCandles(token, chartId, sessionKey, new Date(chart.visible_range?.[1] ?? to).toISOString(), chart.candle_count ?? 200);
+        const page = await fetchChartCandles(token, chartId, sessionKey, new Date(chart.visible_range ? chart.visible_range[1] + 1 : to).toISOString(), chart.candle_count ?? 200);
         if (closed) return [];
         return page.candles.map(c => ({ timestamp: Date.parse(c.time), open: Number(c.open), high: Number(c.high),
           low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 }));
@@ -60,9 +61,15 @@ export function CloudChart({ reference }: { reference: string }) {
       },
       unsubscribe: stopFeed,
     };
-    const destroy = mountCloudChart(container.current, chart, feed);
+    const destroy = mountCloudChart(container.current, chart, feed, { selectedTool: drawingTool, onDrawing: drawing => {
+      void updateCloudChart(client, sessionKey, { operation: drawing.id ? "update_annotation" : "add_annotation",
+        chart_id: chart.id, expected_revision: chart.revision, annotation_id: drawing.id, object_revision: drawing.object_revision,
+        annotation_type: "drawing", drawing_name: drawing.name, points: drawing.points })
+        .then(updated => { if (!closed) { setDrawingTool(""); setChart(updated); setError(""); } })
+        .catch(() => { if (!closed) setError("Drawing changed. Reopen the chart before editing."); });
+    } });
     return () => { closed = true; stopFeed(); destroy(); };
-  }, [chart, chartId, sessionKey, token]);
+  }, [chart, chartId, sessionKey, token, drawingTool, client]);
   async function change(operation: Record<string, unknown>) {
     if (!chart || !sessionKey) return;
     try {
@@ -77,6 +84,9 @@ export function CloudChart({ reference }: { reference: string }) {
       <span className="text-muted-foreground">OANDA</span>
       {chart && <select aria-label="Chart timeframe" value={chart.timeframe} onChange={e => void change({ operation: "set_timeframe", timeframe: e.target.value })}>
         {["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"].map(tf => <option key={tf}>{tf}</option>)}
+      </select>}
+      {!!chart?.drawing_tools?.length && <select aria-label="Chart drawing tool" value={drawingTool} onChange={e => setDrawingTool(e.target.value)}>
+        <option value="">Draw…</option>{chart.drawing_tools.map(tool => <option key={tool.id} value={tool.id}>{tool.id}</option>)}
       </select>}
     </div>
     {error && <p className="p-2 text-xs text-destructive" role="status">{error}</p>}

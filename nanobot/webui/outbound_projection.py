@@ -253,6 +253,8 @@ class WebUIOutboundProjector:
                     "event": "cloud_chart_updated", "chat_id": msg.chat_id,
                     "chart_id": event.chart_id, "revision": event.revision,
                     "annotations_revision": event.annotation_revision,
+                    "operation": event.operation, "anchors": [[timestamp, price] for timestamp, price in event.anchors],
+                    "occurred_at": event.occurred_at,
                 }, persistence="transient")
             return
         if isinstance(event, SubagentTaskChanged):

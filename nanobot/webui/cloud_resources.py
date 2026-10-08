@@ -1,6 +1,7 @@
 """Existing authenticated HTTP snapshots and WebSocket mutations for chart resources."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from nanobot.agent.tools.chart import ChartRequest, ChartTool
@@ -22,7 +23,21 @@ async def chart_snapshot(config: Config, chart_id: str, principal: str,
     service = ChartService()
     chart = service.get(chart_id, ChartActor(principal=principal))
     if not candles:
-        return chart.model_dump(mode="json")
+        state: dict[str, object] = chart.model_dump(mode="json")
+        from nanobot.charts.capabilities import DRAWING_ANCHORS
+        from nanobot.charts.work import temporary_drawings
+        state["temporary_annotations"] = [a.model_dump(mode="json") for a in temporary_drawings(chart.id, principal)]
+        state["drawing_tools"] = [{"id": name, "anchors": anchors} for name, anchors in DRAWING_ANCHORS.items()]
+        if any(instance.indicator_id.startswith("indicator_") for instance in chart.indicator_instances):
+            from nanobot.charts.controller import candle_time
+            from nanobot.charts.scene import build_scene
+            custom_view = chart.model_copy(deep=True)
+            custom_view.studies = []
+            custom_view.indicator_instances = [instance for instance in chart.indicator_instances if instance.indicator_id.startswith("indicator_")]
+            scene = await asyncio.to_thread(build_scene, custom_view, ChartActor(principal=principal))
+            state["computed_series"] = [series.model_dump(mode="json") for series in scene.series]
+            state["computed_timestamps"] = [candle_time(c) for c in scene.candles]
+        return state
     if config.tools.integrations.oanda is None:
         raise ValueError("OANDA connection is not configured")
     cache = MarketCache()
@@ -52,13 +67,13 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
     registry = ToolRegistry()
     registry.register(ChartTool(ctx))
     channel, _, chat_id = principal.partition(":")
-    with request_context(RequestContext(channel=channel, chat_id=chat_id, session_key=principal)):
+    with request_context(RequestContext(channel=channel, chat_id=chat_id, session_key=principal, attributes={"chart_user_interaction": True})):
         result = await registry.execute("chart", parsed.model_dump(exclude_none=True))
     if getattr(result, "is_error", False):
         raise ValueError(str(result))
     if not parsed.chart_id:
         raise ValueError("Client changes require an existing chart id")
-    return ChartService().get(parsed.chart_id, ChartActor(principal=principal)).model_dump(mode="json")
+    return await chart_snapshot(config, parsed.chart_id, principal)
 
 
 def resolve_approval(principal: str, approval_id: str, approve: bool) -> dict[str, object]:

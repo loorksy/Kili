@@ -4,6 +4,11 @@ export interface ChartAnnotation {
   text: string;
   created_by: string;
   updated_at: number;
+  library_name?: string | null;
+  visible?: boolean;
+  locked?: boolean;
+  origin?: string;
+  revision?: number;
   points: { timestamp: number | null; value: string }[];
 }
 export interface CloudChartState {
@@ -14,7 +19,12 @@ export interface CloudChartState {
   timeframe: string;
   session_key: string;
   annotations: ChartAnnotation[];
+  temporary_annotations?: ChartAnnotation[];
   studies: string[];
+  indicator_instances?: { id: string; indicator_id: string; calc_params: number[]; pane: "main" | "separate"; visible: boolean }[];
+  computed_series?: { instance_id: string; name: string; kind: string; pane: string; color: string; values: (string | null)[] }[];
+  computed_timestamps?: number[];
+  drawing_tools?: { id: string; anchors: number }[];
   candle_count?: number;
   right_spacing?: number;
   visible_range?: [number, number] | null;
