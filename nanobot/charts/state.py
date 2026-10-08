@@ -17,7 +17,7 @@ from pydantic import (
 
 from nanobot.charts.capabilities import DRAWING_ANCHORS
 from nanobot.charts.indicators import IndicatorInstance
-from nanobot.market.oanda import GRANULARITIES
+from nanobot.market.provider import TIMEFRAMES
 from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore, RuntimeRecord
 
@@ -96,7 +96,8 @@ class CloudChart(RuntimeRecord):
     session_key: str
     linked_responsibility_id: str | None = None
     canonical_instrument: str
-    provider: Literal["oanda"] = "oanda"
+    provider: Literal["oanda", "metaapi"] = "oanda"  # Retain legacy provenance; never relabel old evidence.
+    account_id: str | None = None
     provider_instrument: str
     timeframe: str
     # Additive workstation format: legacy charts receive deterministic defaults.
@@ -115,6 +116,7 @@ class CloudChart(RuntimeRecord):
     def contract(self) -> dict[str, JsonValue]:
         return {"type": "trading_chart", "chart_id": self.id, "instrument": self.canonical_instrument,
                 "provider": self.provider, "provider_instrument": self.provider_instrument,
+                "account_id": self.account_id, "needs_account_binding": self.provider != "metaapi" or self.account_id is None,
                 "timeframe": self.timeframe, "revision": self.revision,
                 "annotations_revision": self.annotation_revision, "data_revision": self.data_revision,
                 "session_key": self.session_key}
@@ -149,7 +151,7 @@ class ChartService:
         self.require_access(chart, actor)
         from nanobot.market.cache import MarketCache
         try:
-            chart.data_revision = MarketCache().get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe).data_revision
+            chart.data_revision = MarketCache(provider=chart.provider, account_id=chart.account_id).get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe).data_revision
         except ValueError:
             pass
         if chart.history_window_id:
@@ -161,10 +163,11 @@ class ChartService:
         return chart
 
     def create(self, actor: ChartActor, canonical: str, symbol: str, timeframe: str,
-               scope: Literal["MAIN", "SHARED", "WORKER", "RESPONSIBILITY"] = "MAIN") -> CloudChart:
-        from nanobot.market.oanda import OandaClient
-        OandaClient.validate_symbol(symbol)
-        if timeframe not in GRANULARITIES:
+               scope: Literal["MAIN", "SHARED", "WORKER", "RESPONSIBILITY"] = "MAIN", *,
+               account_id: str | None = None) -> CloudChart:
+        from nanobot.trading.metaapi import MetaApiClient
+        MetaApiClient.validate_symbol(symbol)
+        if timeframe not in TIMEFRAMES:
             raise ValueError("Unsupported chart timeframe")
         if actor.worker_id and scope == "MAIN":
             scope = "WORKER"
@@ -177,6 +180,7 @@ class ChartService:
             session_key=actor.parent_principal or actor.principal,
             linked_responsibility_id=actor.responsibility_id, canonical_instrument=canonical,
             provider_instrument=symbol, timeframe=timeframe,
+            provider="metaapi" if account_id else "oanda", account_id=account_id,
         ))
 
     def update(self, chart: CloudChart, actor: ChartActor, expected_revision: int) -> CloudChart:
@@ -189,12 +193,12 @@ class ChartService:
                     candidate = proposed.get(annotation.id)
                     if not annotation.agent_editable or (candidate and candidate.agent_editable != annotation.agent_editable):
                         raise PermissionError("User drawings require explicit user permission")
-        for key in ("owner_scope", "owner_reference", "session_key", "linked_responsibility_id"):
+        for key in ("owner_scope", "owner_reference", "session_key", "linked_responsibility_id", "provider", "account_id"):
             if getattr(current, key) != getattr(chart, key):
                 raise PermissionError("Chart ownership cannot change during an edit")
         if chart.revision != expected_revision:
             raise ValueError("Chart revision conflict")
-        if chart.timeframe not in GRANULARITIES:
+        if chart.timeframe not in TIMEFRAMES:
             raise ValueError("Unsupported chart timeframe")
         if chart.visible_range and chart.visible_range[0] >= chart.visible_range[1]:
             raise ValueError("Invalid visible range")

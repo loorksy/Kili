@@ -180,7 +180,8 @@ class AccountEnvironment:
         if operation == "connection":
             await self.account.reload()
             return {"_id": self.account.id, "state": self.account.state,
-                    "connectionStatus": self.account.connection_status, "region": self.account.region}
+                    "connectionStatus": self.account.connection_status, "region": self.account.region,
+                    "platformVersion": self.account.version}
         if operation == "candles":
             return await self.account.get_historical_candles(params["symbol"], params["timeframe"],
                                                            timestamp(params["start"]) if params.get("start") else None,

@@ -8,6 +8,7 @@ interface Recommendation {
   instrument: string; intent: Intent; timeframe: string; summary: string;
   entry: string[]; targets: string[]; stop_loss?: string; evidence_time?: string;
   chart_id?: string; session_key?: string;
+  source?: "metaapi" | "oanda";
 }
 function parse(text: string): Recommendation | null {
   try {
@@ -25,7 +26,8 @@ function parse(text: string): Recommendation | null {
       stop_loss: row.stop_loss as string | undefined,
       evidence_time: typeof row.evidence_time === "string" ? row.evidence_time.slice(0, 80) : undefined,
       chart_id: typeof row.chart_id === "string" ? row.chart_id : undefined,
-      session_key: typeof row.session_key === "string" ? row.session_key : undefined };
+      session_key: typeof row.session_key === "string" ? row.session_key : undefined,
+      source: row.source === "metaapi" || row.source === "oanda" ? row.source : undefined };
   } catch { return null; }
 }
 
@@ -41,7 +43,7 @@ export function MarketRecommendation({ reference }: { reference: string }) {
   return <section aria-label={ar ? "توصية السوق" : "Market recommendation"} dir={ar ? "rtl" : undefined} className={`my-3 overflow-hidden rounded-2xl border ${accent}`}>
     <div className="flex items-center gap-3 border-b border-border/50 p-4">
       <span className={`rounded-xl bg-background/70 p-2 ${color}`}><Icon className="h-6 w-6" /></span>
-      <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">{ar ? "تحليل السوق · OANDA" : "Market analysis · OANDA"}</p><p className="font-semibold" dir="ltr">{row.instrument} <span className="text-xs font-normal text-muted-foreground">{row.timeframe}</span></p></div>
+      <div className="min-w-0 flex-1"><p className="text-xs text-muted-foreground">{ar ? "تحليل السوق" : "Market analysis"}{row.source === "metaapi" ? (ar ? " · بيانات الوسيط" : " · Broker data") : row.source === "oanda" ? " · OANDA" : ""}</p><p className="font-semibold" dir="ltr">{row.instrument} <span className="text-xs font-normal text-muted-foreground">{row.timeframe}</span></p></div>
       <span className={`rounded-full bg-background/80 px-3 py-1 text-sm font-semibold ${color}`}>{labels[row.intent]}</span>
     </div>
     <div className="space-y-3 p-4"><p className="whitespace-pre-wrap text-sm">{row.summary}</p>

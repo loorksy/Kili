@@ -12,7 +12,7 @@ from nanobot.config.schema import ToolsConfig
 
 async def test_scripted_analyst_uses_existing_registry_and_chart_not_browser(workstation, tmp_path, monkeypatch):
     charts, controller, actor, chart, data = workstation
-    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda: controller.cache)
+    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     controller.cache.put("XAU_USD", "gold", "D", data)
     controller.cache.put("XAU_USD", "gold", "H4", data)
     bus = MessageBus()

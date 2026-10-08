@@ -79,6 +79,7 @@ class Candle(TimedEvidence):
     complete: bool
     source: str
     fetched_at: datetime
+    account_id: str | None = None
 
 
 class Quote(TimedEvidence):
@@ -91,3 +92,4 @@ class Quote(TimedEvidence):
     source: str
     fetched_at: datetime
     tradable: bool = True
+    account_id: str | None = None

@@ -18,18 +18,27 @@ class CandleSeries(RuntimeRecord):
 
 
 class MarketCache:
-    def __init__(self, records: RecordStore[CandleSeries] | None = None):
+    def __init__(self, records: RecordStore[CandleSeries] | None = None, *, provider: str = "oanda",
+                 account_id: str | None = None):
         self.records = records or RecordStore("market_candles", CandleSeries)
+        self.provider, self.account_id = provider, account_id
 
     @staticmethod
-    def identity(symbol: str, canonical: str, timeframe: str) -> str:
-        return hashlib.sha256(json.dumps(["oanda", symbol, canonical, timeframe]).encode()).hexdigest()
+    def identity(symbol: str, canonical: str, timeframe: str, *, provider: str = "oanda",
+                 account_id: str | None = None) -> str:
+        key = [provider, symbol, canonical, timeframe]
+        if account_id is not None:
+            key.append(account_id)
+        return hashlib.sha256(json.dumps(key).encode()).hexdigest()
 
     def get(self, symbol: str, canonical: str, timeframe: str) -> CandleSeries:
-        return self.records.get(self.identity(symbol, canonical, timeframe))
+        return self.records.get(self.identity(symbol, canonical, timeframe, provider=self.provider, account_id=self.account_id))
 
     def put(self, symbol: str, canonical: str, timeframe: str, candles: list[Candle]) -> CandleSeries:
-        identity = self.identity(symbol, canonical, timeframe)
+        if any(c.source != self.provider or c.account_id != self.account_id
+               or c.provider_instrument != symbol or c.canonical_instrument != canonical for c in candles):
+            raise ValueError("Market cache evidence belongs to another provider, account or instrument")
+        identity = self.identity(symbol, canonical, timeframe, provider=self.provider, account_id=self.account_id)
         for attempt in range(3):
             try:
                 series = self.records.get(identity)

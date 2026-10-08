@@ -19,7 +19,7 @@ from nanobot.config.schema import ToolsConfig
 
 async def test_requested_picture_becomes_real_attachment_without_vision_or_image_provider(workstation, tmp_path, monkeypatch):
     charts, controller, actor, chart, _ = workstation
-    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda: controller.cache)
+    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     bus = MessageBus()
     config = ToolsConfig(restrict_to_workspace=True)
     assert not config.image_generation.enabled
@@ -55,7 +55,7 @@ async def test_snapshot_scope_denial_cannot_export_another_private_chart(worksta
 
 def test_bundled_font_arabic_shaping_and_deterministic_picture(workstation, monkeypatch):
     _, controller, actor, chart, _ = workstation
-    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda: controller.cache)
+    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     chart.annotations.append(Annotation(id="annotation_" + "a" * 32, type="horizontal_line",
         points=[ChartPoint(value="110")], created_by=actor.principal, text="منطقة شراء — الهدف ١٢٠"))
     scene = build_scene(chart, actor)

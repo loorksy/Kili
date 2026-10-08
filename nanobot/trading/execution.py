@@ -9,7 +9,7 @@ from loguru import logger
 from pydantic import Field, JsonValue
 
 from nanobot.agent.tools.context import current_request_context
-from nanobot.market.oanda import ProviderUnavailableError
+from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import (
     ActionStore,
     Effect,

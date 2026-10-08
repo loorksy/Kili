@@ -16,7 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from nanobot.market.models import Connection
-from nanobot.market.oanda import ProviderUnavailableError
+from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import current_authorized_action
 from nanobot.security.runtime_storage import internal_state_root
 from nanobot.security.secrets import SecretStore

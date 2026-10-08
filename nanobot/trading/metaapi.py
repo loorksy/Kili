@@ -16,7 +16,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 
 from nanobot.market.models import Connection
-from nanobot.market.oanda import ProviderUnavailableError, parse_provider
+from nanobot.market.provider import ProviderUnavailableError, parse_provider
 from nanobot.security.actions import ActionStore, Effect, current_authorized_action
 from nanobot.security.network import PinnedDNSAsyncTransport, httpx_env_proxy_mounts
 from nanobot.security.secrets import SecretStore
@@ -104,6 +104,7 @@ class AccountConnection(BaseModel):
     state: str
     connection_status: str = Field(alias="connectionStatus")
     region: str
+    platform_version: int | None = Field(default=None, alias="platformVersion", ge=4, le=5)
 
 
 class TradeResponse(BaseModel):
@@ -125,7 +126,9 @@ class MetaApiClient:
 
     @staticmethod
     def validate_symbol(symbol: str) -> str:
-        if not re.fullmatch(r"[a-zA-Z0-9_.#-]{1,80}", symbol):
+        # SDK symbol arguments are opaque market identifiers, not URLs/paths.
+        # Brokers legitimately advertise '+', spaces and slash suffixes.
+        if not 1 <= len(symbol) <= 80 or not symbol.isprintable() or symbol.isspace():
             raise ValueError("Invalid broker symbol")
         return quote(symbol, safe="")
 

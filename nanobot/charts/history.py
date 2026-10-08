@@ -27,9 +27,10 @@ class ChartHistory:
         if not 2 <= len(ordered) <= 5000:
             raise ValueError("Historical view requires 2–5000 candles")
         for candle in ordered:
-            if candle.provider_instrument != chart.provider_instrument or candle.canonical_instrument != chart.canonical_instrument:
+            if (candle.provider_instrument != chart.provider_instrument or candle.canonical_instrument != chart.canonical_instrument
+                    or candle.source != chart.provider or candle.account_id != chart.account_id):
                 raise ValueError("Historical evidence does not match chart instrument")
-        identity = hashlib.sha256(json.dumps([chart.provider_instrument, chart.canonical_instrument, chart.timeframe,
+        identity = hashlib.sha256(json.dumps([chart.provider, chart.account_id, chart.provider_instrument, chart.canonical_instrument, chart.timeframe,
             ordered[0].time.isoformat(), ordered[-1].time.isoformat()]).encode()).hexdigest()
         evidence = [c.model_dump(mode="json", exclude={"fetched_at"}) for c in ordered]
         digest = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode()).hexdigest()

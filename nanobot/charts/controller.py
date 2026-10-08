@@ -31,7 +31,7 @@ def chart_candles(chart: CloudChart, cache: MarketCache | None = None) -> list[C
     if window and window.candles and chart.visible_range and candle_time(window.candles[0]) <= chart.visible_range[0] and candle_time(window.candles[-1]) >= chart.visible_range[1]:
         chart.data_revision = window.data_revision
         return window.candles
-    return (cache or MarketCache()).get(chart.provider_instrument, chart.canonical_instrument,
+    return (cache or MarketCache(provider=chart.provider, account_id=chart.account_id)).get(chart.provider_instrument, chart.canonical_instrument,
                                       chart.timeframe).candles
 
 
@@ -49,7 +49,7 @@ def visible_candles(chart: CloudChart, candles: list[Candle]) -> list[Candle]:
 class ChartController:
     def __init__(self, service: ChartService, cache: MarketCache | None = None):
         self.service = service
-        self.cache = cache or MarketCache()
+        self.cache = cache
 
     def view(self, chart: CloudChart, actor: ChartActor, revision: int,
              action: ViewOperation) -> CloudChart:

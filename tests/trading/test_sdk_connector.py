@@ -171,6 +171,47 @@ async def test_connector_rejects_trade_without_gateway_authority(tmp_path):
     assert bridge._process is None
 
 
+async def test_sdk_mutation_refences_after_account_synchronization(client, tmp_path, monkeypatch):
+    from test_execution import approve, setup
+
+    from nanobot.agent.tools.context import RequestContext, request_context
+
+    preview, executor, registry = await setup(tmp_path, client)
+    original_request = client._request
+    calls = []
+
+    async def reads(method, path, **kwargs):
+        if method == "GET":
+            # Keep read-only fixture data while exercising the production SDK
+            # mutation branch (no injected transport and no live connection).
+            client.transport = legacy_transport
+            try:
+                return await original_request(method, path, **kwargs)
+            finally:
+                client.transport = None
+        raise AssertionError("No HTTP financial mutation allowed")
+
+    async def sdk_request(operation, parameters=None):
+        calls.append(operation)
+        if operation == "prepare_trade":
+            effect = executor.effects.find_effect(preview.effect_key)
+            executor.effects.recover()
+            assert executor.effects.get_effect(effect.id).state == "UNCERTAIN"
+            return {"ready": True}
+        raise AssertionError("A superseded effect must not reach SDK trade")
+
+    legacy_transport = client.transport
+    monkeypatch.setattr(client, "_request", reads)
+    monkeypatch.setattr("nanobot.trading.sdk_bridge.account_bridge", lambda *_: SimpleNamespace(request=sdk_request))
+    client.transport = None
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key="websocket:main")):
+        approve(preview, executor.effects)
+        result = await registry.execute("trade_execute", {"preview_id": preview.id})
+        assert result.is_error
+    assert calls == ["prepare_trade"]
+    assert executor.effects.find_effect(preview.effect_key).state == "UNCERTAIN"
+
+
 def test_missing_mapping_error_is_actionable(client, tmp_path):
     from nanobot.security.actions import ActionStore
     from nanobot.session.records import RecordStore

@@ -22,7 +22,7 @@ def test_native_builtin_calculations_are_bounded_and_reproducible(name, params, 
 
 def test_render_same_authoritative_scene_without_browser(workstation, monkeypatch):
     service, controller, actor, chart, data = workstation
-    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda: controller.cache)
+    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     chart.annotations.append(Annotation(id="annotation_" + "a" * 32, type="price_zone", points=[
         ChartPoint(timestamp=int(data[20].time.timestamp() * 1000), value=95),
         ChartPoint(timestamp=int(data[40].time.timestamp() * 1000), value=110)], created_by=actor.principal))

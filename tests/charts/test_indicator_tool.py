@@ -20,7 +20,7 @@ def definition():
 
 async def test_factory_import_version_pin_and_control(workstation, tmp_path, monkeypatch):
     charts, controller, actor, chart, data = workstation
-    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda: controller.cache)
+    monkeypatch.setattr("nanobot.charts.controller.MarketCache", lambda **_scope: controller.cache)
     registry = IndicatorRegistry(RecordStore("custom_indicators", CustomIndicator, ActionStore(tmp_path / "state.db")))
     tool = ChartIndicatorTool(ToolContext(config=ToolsConfig(), workspace=str(tmp_path)))
     tool.registry, tool.charts = registry, charts

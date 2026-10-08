@@ -391,6 +391,14 @@ class ToolsConfig(Base):
     tool implementations.
     """
 
+    def __init__(self, **data: Any) -> None:
+        # An import cycle may defer the eager rebuild below. Direct tool-context
+        # construction must finish that deferred work once modules are loaded,
+        # just as the configuration loader does for the root model.
+        if not type(self).__pydantic_complete__:
+            _resolve_tool_config_refs()
+        super().__init__(**data)
+
     web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
     exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
     file: FileToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.filesystem", "FileToolsConfig"))

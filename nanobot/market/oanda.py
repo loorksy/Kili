@@ -6,20 +6,17 @@ import json
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Literal, TypeVar
+from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.market.models import Candle, Connection, Quote
+from nanobot.market.provider import ProviderUnavailableError, parse_provider
 from nanobot.security.network import PinnedDNSAsyncTransport, httpx_env_proxy_mounts
 from nanobot.security.secrets import SecretStore
 
 GRANULARITIES = ("S5", "S10", "S15", "S30", "M1", "M2", "M4", "M5", "M10", "M15", "M30", "H1", "H2", "H3", "H4", "H6", "H8", "H12", "D", "W", "M")
-
-
-class ProviderUnavailableError(RuntimeError):
-    """Sanitized exception: never carry request/response/authentication objects."""
 
 
 class OandaInstrument(BaseModel):
@@ -78,16 +75,6 @@ class _Prices(BaseModel):
 
 class _StreamFrame(BaseModel):
     type: Literal["PRICE", "HEARTBEAT"]
-
-
-_ModelT = TypeVar("_ModelT", bound=BaseModel)
-
-
-def parse_provider(model: type[_ModelT], data: object) -> _ModelT:
-    try:
-        return model.model_validate(data)
-    except ValidationError:
-        raise ProviderUnavailableError("Provider returned invalid structured data") from None
 
 
 class OandaClient:

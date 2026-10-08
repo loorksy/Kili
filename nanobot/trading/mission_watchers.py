@@ -9,7 +9,7 @@ from typing import Literal
 from nanobot.agent.tools.context import RequestContext, ResponsibilityExecution, request_context
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.trade_execute import TradeExecuteTool
-from nanobot.market.oanda import ProviderUnavailableError
+from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import ActionPolicy, now_ms
 from nanobot.session.responsibilities import ResponsibilityStore
 from nanobot.trading.execution import TradeExecutor

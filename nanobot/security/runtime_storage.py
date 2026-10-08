@@ -9,10 +9,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from nanobot.config.paths import get_config_path
 from nanobot.security.workspace_policy import WorkspaceBoundaryError
 
 _RUNTIME_CODE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def get_config_path() -> Path:
+    # The config package resolves tool DTOs. Importing it while provider/tool
+    # modules are still loading can leave ToolsConfig forward references open.
+    from nanobot.config.paths import get_config_path as active_config_path
+    return active_config_path()
 
 
 def internal_state_root(*, create: bool = False) -> Path:
