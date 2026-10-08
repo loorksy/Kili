@@ -2,7 +2,12 @@ from decimal import Decimal
 
 import pytest
 
-from nanobot.charts.indicators import CustomIndicator, IndicatorDefinition, IndicatorRegistry, evaluate
+from nanobot.charts.indicators import (
+    CustomIndicator,
+    IndicatorDefinition,
+    IndicatorRegistry,
+    evaluate,
+)
 from nanobot.security.actions import ActionStore
 from nanobot.session.records import RecordStore
 
@@ -41,6 +46,11 @@ def test_immutable_version_and_private_access(tmp_path):
         registry.get(first.id, "websocket:other")
     with pytest.raises(PermissionError):
         registry.register(definition, "websocket:other", family_id=first.family_id)
+    published = registry.register(updated, first.author, family_id=first.family_id, scope="SHARED")
+    assert published.indicator_version == 3
+    assert registry.get(published.id, "websocket:other").scope == "SHARED"
+    with pytest.raises(PermissionError):
+        registry.get(second.id, "websocket:other")
 
 
 @pytest.mark.parametrize("change", [
@@ -65,3 +75,13 @@ def test_bounded_work_and_safe_zero_division(workstation):
     costly = IndicatorDefinition.model_validate({"name": "Bounded", "nodes": [{"op": "input"}] + [{"op": "mean", "inputs": [0], "window": 512} for _ in range(63)], "outputs": [{"name": "x", "node": 1}]})
     with pytest.raises(ValueError, match="budget"):
         evaluate(costly, data)
+
+
+def test_conditional_output_can_mask_markers_with_missing_series(workstation):
+    *_, data = workstation
+    definition = IndicatorDefinition.model_validate({"name": "Masked", "nodes": [
+        {"op": "constant", "value": "1"}, {"op": "input", "field": "high"}, {"op": "missing"},
+        {"op": "choose", "inputs": [0, 1, 2]}], "outputs": [{"name": "point", "node": 3, "kind": "marker"}]})
+    assert evaluate(definition, data)["point"] == [c.high for c in data]
+    definition.nodes[0].value = Decimal(0)
+    assert evaluate(definition, data)["point"] == [None] * len(data)

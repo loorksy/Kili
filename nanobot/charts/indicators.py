@@ -32,7 +32,7 @@ class Parameter(BaseModel):
 
 class Node(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["input", "constant", "parameter", "add", "subtract", "multiply", "divide", "gt", "lt", "equal", "and", "or", "choose", "mean", "min", "max", "std", "ema", "shift", "cross_above", "cross_below", "swing_high", "swing_low"]
+    op: Literal["input", "missing", "constant", "parameter", "add", "subtract", "multiply", "divide", "gt", "lt", "equal", "and", "or", "choose", "mean", "min", "max", "std", "ema", "shift", "cross_above", "cross_below", "swing_high", "swing_low"]
     inputs: list[int] = Field(default_factory=list, max_length=3)
     field: Literal["open", "high", "low", "close", "volume"] = "close"
     value: Decimal = Decimal(0)
@@ -54,6 +54,8 @@ class Output(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     node: int = Field(ge=0)
     kind: Literal["line", "histogram", "marker", "state", "band"] = "line"
+    anchor_offset: int = Field(default=0, ge=0, le=512)
+    anchor_offset_parameter: str | None = None
     color: str = Field(default="#38bdf8", pattern=r"^#[0-9a-fA-F]{6}$")
 
 
@@ -80,6 +82,8 @@ class IndicatorDefinition(BaseModel):
                     raise ValueError("Unknown window parameter")
             if node.op == "parameter" and node.parameter not in self.parameters:
                 raise ValueError("Unknown indicator parameter")
+        if any(output.anchor_offset_parameter is not None and output.anchor_offset_parameter not in self.parameters for output in self.outputs):
+            raise ValueError("Unknown output anchor offset parameter")
         if any(output.node >= len(self.nodes) for output in self.outputs):
             raise ValueError("Unknown output node")
         if len({o.name for o in self.outputs}) != len(self.outputs):
@@ -154,6 +158,11 @@ def evaluate(definition: IndicatorDefinition, candles: list[Candle],
                             valid_neighbors = [v for v in neighbors if v is not None]
                             if all(pivot > v if node.op == "swing_high" else pivot < v for v in valid_neighbors):
                                 value = pivot
+                elif node.op == "choose":
+                    condition = args[0][i]
+                    value = args[1][i] if condition else args[2][i] if condition is not None else None
+                elif node.op == "missing":
+                    value = None
                 else:
                     operands = [arg[i] for arg in args]
                     if all(v is not None for v in operands):
@@ -177,8 +186,6 @@ def evaluate(definition: IndicatorDefinition, candles: list[Candle],
                             value = Decimal(bool(a) and bool(b))
                         elif node.op == "or":
                             value = Decimal(bool(a) or bool(b))
-                        elif node.op == "choose":
-                            value = b if a else valid[2]
                         elif node.op in {"cross_above", "cross_below"} and i:
                             previous_a, previous_b = args[0][i - 1], args[1][i - 1]
                             if previous_a is not None and previous_b is not None:
@@ -215,8 +222,10 @@ class IndicatorRegistry:
         payload = definition.model_dump(mode="json")
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         existing = [r for r in self.records.list() if r.author == author]
-        if len(existing) >= 200:
-            raise ValueError("Indicator registry quota exceeded")
+        if family_id is None:
+            for record in existing:
+                if record.definition_hash == digest and record.scope == scope and record.source == source and record.original_filename == filename:
+                    return record
         family = family_id or "indicator_" + uuid.uuid4().hex
         previous = [r for r in existing if r.family_id == family]
         if family_id and not previous:
@@ -224,6 +233,8 @@ class IndicatorRegistry:
         for record in previous:
             if record.definition_hash == digest and record.scope == scope:
                 return record
+        if len(existing) >= 200:
+            raise ValueError("Indicator registry quota exceeded")
         fixture = [Candle(canonical_instrument="fixture", provider_instrument="FIXTURE", time=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(hours=i), open=Decimal(i + 1), high=Decimal(i + 2), low=Decimal(i), close=Decimal(i + 1), complete=True, source="fixture", fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc)) for i in range(600)]
         for data in ([], fixture[:1], fixture[:10], fixture):
             if evaluate(definition, data) != evaluate(definition, data):

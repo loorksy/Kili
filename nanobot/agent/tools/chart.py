@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
@@ -18,13 +19,16 @@ from nanobot.charts.capabilities import (
     indicator_descriptors,
 )
 from nanobot.charts.controller import ChartController, ViewOperation
-from nanobot.charts.state import Annotation, ChartActor, ChartPoint, ChartService
+from nanobot.charts.state import Annotation, ChartActor, ChartPoint, ChartRange, ChartService
 from nanobot.charts.work import (
     get_presence,
+    get_user_cursor,
     put_temporary,
     remove_temporary,
+    report_user_cursor,
     set_presence,
     temporary_drawings,
+    temporary_indicators,
 )
 from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore
@@ -32,30 +36,48 @@ from nanobot.session.records import RecordStore
 
 class ChartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "set_studies", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations", "view", "inspect_candle", "capabilities", "duplicate_annotation", "configure_annotation", "load_history", "clear_temporary", "publish_annotation", "cursor", "select_drawing_tool", "inspect_presence"]
+    operation: Literal["create", "get", "set_instrument", "set_timeframe", "set_visible_range", "set_studies", "add_annotation", "update_annotation", "remove_annotation", "clear_annotations", "view", "inspect_candle", "capabilities", "duplicate_annotation", "configure_annotation", "load_history", "clear_temporary", "publish_annotation", "cursor", "select_drawing_tool", "inspect_presence", "set_animation_mode", "report_crosshair"]
     history_count: int = Field(default=500, ge=2, le=5000)
     history_before: str | None = None
     view: ViewOperation | None = None
-    candle_timestamp: int | None = None
+    candle_timestamp: int | None = Field(default=None, ge=0, le=8640000000000000)
     candle_index: int | None = None
+    pointer_pane: str = Field(default="candle_pane", max_length=80)
+    animation_mode: Literal["normal", "fast", "instant"] = "fast"
     temporary: bool = False
     drawing_name: str | None = None
     object_revision: int | None = None
     visible: bool | None = None
     locked: bool | None = None
+    agent_editable: bool | None = None
     chart_id: str | None = None
     expected_revision: int | None = None
     canonical_instrument: str | None = None
     provider_instrument: str | None = None
     timeframe: str | None = None
     owner_scope: Literal["MAIN", "SHARED", "WORKER", "RESPONSIBILITY"] = "MAIN"
-    visible_range: tuple[int, int] | None = None
+    visible_range: ChartRange | None = None
     studies: list[str] | None = None
     annotation_id: str | None = None
     annotation_type: Literal["horizontal_line", "trend_line", "price_zone", "marker", "note", "entry", "stop", "target", "drawing"] = "note"
     points: list[ChartPoint] | None = Field(default=None, min_length=1, max_length=9)
     text: str = Field(default="", max_length=2000)
     evidence_refs: list[str] = Field(default_factory=list, max_length=20)
+
+
+    @field_validator("drawing_name")
+    @classmethod
+    def supported_drawing(cls, value: str | None) -> str | None:
+        if value is not None and value not in DRAWING_ANCHORS:
+            raise ValueError("Unavailable drawing tool")
+        return value
+
+    @field_validator("history_before")
+    @classmethod
+    def aware_history_boundary(cls, value: str | None) -> str | None:
+        if value is not None and datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError("Historical boundary requires an explicit timezone")
+        return value
 
 
 def current_chart_actor() -> ChartActor:
@@ -90,7 +112,7 @@ class ChartTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Create/get/update a persistent cloud chart, instrument/timeframe/range or structured annotations. Include expected_revision for edits. Return the trading_chart code fence to embed it in chat."
+        return "Operate the persistent cloud chart with semantic timestamps/prices: capabilities discovery, historical loading, view zoom/pan/jump/range, exact candle inspection, drawings and virtual cursor. Include expected_revision for edits and object_revision for drawing edits. Temporary drawings require explicit publication. Return the trading_chart code fence to embed it in chat."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -126,15 +148,37 @@ class ChartTool(Tool):
                 connection = self.ctx.config.integrations.oanda
                 if connection is None:
                     raise ValueError("OANDA connection is not configured")
+                self.service.require_access(chart, actor, write=True)
+                if request.expected_revision is None:
+                    raise ValueError("Expected revision is required to select a historical window")
                 candles = await OandaClient(connection).candles(chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=request.history_count, before=request.history_before)
+                from nanobot.charts.history import ChartHistory
+                window = ChartHistory().put(chart, candles)
+                chart.history_window_id = window.id
+                chart.candle_count = len(window.candles)
+                chart.visible_range = (int(window.candles[0].time.timestamp() * 1000), int(window.candles[-1].time.timestamp() * 1000))
+                chart = self.service.update(chart, actor, request.expected_revision)
+                if self.bus:
+                    channel, _, chat_id = chart.session_key.partition(":")
+                    await self.bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content="", event=CloudChartChanged(chart_id=chart.id, revision=chart.revision, annotation_revision=chart.annotation_revision, operation="load_history", occurred_at=now_ms())))
                 return json.dumps({"chart_id": chart.id, "timeframe": chart.timeframe, "candles": [c.model_dump(mode="json") for c in candles]})
             if request.operation == "get":
                 state = chart.model_dump(mode="json")
+                state["temporary_indicator_instances"] = [s.model_dump(mode="json") for s in temporary_indicators(chart.id, actor.principal)]
                 state["temporary_annotations"] = [a.model_dump(mode="json") for a in temporary_drawings(chart.id, actor.principal)]
                 return json.dumps(state)
+            if request.operation == "report_crosshair":
+                if not actor.user_interaction:
+                    raise PermissionError("Only an authenticated user client can report its crosshair")
+                if request.points and (len(request.points) != 1 or request.points[0].timestamp is None):
+                    raise ValueError("Crosshair requires one semantic point")
+                with RecordStore.execution_write():
+                    report_user_cursor(chart.id, actor.principal, request.points[0] if request.points else None, request.pointer_pane)
+                return json.dumps({"reported": True})
             if request.operation == "inspect_presence":
                 cursor, selected = get_presence(chart.id, actor.principal)
-                return json.dumps({"cursor": cursor.model_dump(mode="json") if cursor else None, "drawing_tool": selected, "visible_range": chart.visible_range, "candle_count": chart.candle_count})
+                user_cursor, age, pane = get_user_cursor(chart.id, actor.principal)
+                return json.dumps({"user_crosshair": user_cursor.model_dump(mode="json") if user_cursor else None, "user_crosshair_age_ms": age, "user_crosshair_pane": pane, "cursor": cursor.model_dump(mode="json") if cursor else None, "drawing_tool": selected, "visible_range": chart.visible_range, "candle_count": chart.candle_count})
             if request.operation == "inspect_candle":
                 return ChartController(self.service).inspect(chart, timestamp=request.candle_timestamp, index=request.candle_index).model_dump_json()
             if request.expected_revision is None:
@@ -147,7 +191,9 @@ class ChartTool(Tool):
                 self.service.require_access(chart, actor, write=True)
                 if request.operation == "select_drawing_tool" and request.drawing_name not in DRAWING_ANCHORS:
                     raise ValueError("Unavailable drawing tool")
-                if request.operation == "cursor" and (not request.points or request.points[0].timestamp is None):
+                if request.drawing_name is not None and request.drawing_name not in DRAWING_ANCHORS:
+                    raise ValueError("Unavailable drawing tool")
+                if request.operation == "cursor" and (not request.points or len(request.points) != 1 or request.points[0].timestamp is None):
                     raise ValueError("Cursor requires a market timestamp and price")
                 with RecordStore.execution_write():
                     set_presence(chart.id, actor.principal, request.points[0] if request.points else None, request.drawing_name)
@@ -171,6 +217,7 @@ class ChartTool(Tool):
                 if not request.timeframe:
                     raise ValueError("Timeframe is required")
                 chart.timeframe = request.timeframe
+                chart.history_window_id = None
             elif request.operation == "set_instrument":
                 if not request.canonical_instrument or not request.provider_instrument:
                     raise ValueError("Explicit instruments are required")
@@ -178,8 +225,12 @@ class ChartTool(Tool):
                 OandaClient.validate_symbol(request.provider_instrument)
                 chart.canonical_instrument, chart.provider_instrument = request.canonical_instrument, request.provider_instrument
                 chart.data_revision = ""
+                chart.history_window_id = None
+                chart.visible_range = None
             elif request.operation == "set_visible_range":
                 chart.visible_range = request.visible_range
+            elif request.operation == "set_animation_mode":
+                chart.layout["agent_animation_mode"] = request.animation_mode
             elif request.operation == "set_studies":
                 if request.studies is None:
                     raise ValueError("Structured studies are required")
@@ -197,12 +248,17 @@ class ChartTool(Tool):
                 if request.operation == "configure_annotation":
                     if existing is None:
                         raise ValueError("Unknown annotation")
+                    if request.agent_editable is not None:
+                        if not actor.user_interaction:
+                            raise PermissionError("Only the user can authorize edits to user drawings")
+                        existing.agent_editable = request.agent_editable
                     if request.visible is not None:
                         existing.visible = request.visible
                     if request.locked is not None:
                         existing.locked = request.locked
                     existing.revision += 1
                     existing.updated_at = now_ms()
+                    existing.updated_by = actor.worker_id or actor.principal
                 elif request.operation == "duplicate_annotation":
                     if existing is None:
                         raise ValueError("Unknown annotation")
@@ -232,6 +288,7 @@ class ChartTool(Tool):
                         annotation.id, annotation.created_at = existing.id, existing.created_at
                         annotation.created_by = existing.created_by
                         annotation.origin = existing.origin
+                        annotation.agent_editable = existing.agent_editable
                         annotation.visible, annotation.locked = existing.visible, existing.locked
                         annotation.library_name = request.drawing_name or existing.library_name
                         annotation.responsibility_id = existing.responsibility_id

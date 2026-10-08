@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.charts.capabilities import BUILTIN_DEFAULTS
 from nanobot.market.models import Candle
+from nanobot.security.runtime_storage import protect_runtime_command
 
 
 class NativeFigure(BaseModel):
@@ -42,10 +43,13 @@ def native_values(name: str, candles: list[Candle], parameters: list[float]) -> 
         {"timestamp": int(c.time.timestamp() * 1000), "open": float(c.open), "high": float(c.high),
          "low": float(c.low), "close": float(c.close), "volume": c.volume or 0} for c in candles]}
     try:
-        completed = subprocess.run([node, "--permission", "--allow-fs-read=" + str(assets),
-            "--max-old-space-size=64", str(worker)], input=json.dumps(payload), text=True,
+        command = protect_runtime_command([node, "--permission", "--allow-fs-read=" + str(assets),
+            "--max-old-space-size=64", str(worker)])
+        if command[0].endswith("bwrap"):
+            command.insert(1, "--unshare-net")
+        completed = subprocess.run(command, input=json.dumps(payload), text=True,
             capture_output=True, timeout=3, env={}, cwd=assets, check=False)
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
         raise ValueError("Chart indicator calculation unavailable") from None
     if completed.returncode or len(completed.stdout) > 2_000_000:
         raise ValueError("Chart indicator calculation failed")

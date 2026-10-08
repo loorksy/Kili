@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nanobot.charts.state import ChartActor, ChartService, CloudChart
+from nanobot.charts.state import ChartActor, ChartRange, ChartService, CloudChart
 from nanobot.market.cache import MarketCache
 from nanobot.market.models import Candle
 
@@ -17,12 +17,20 @@ class ViewOperation(BaseModel):
     candle_count: int | None = Field(default=None, ge=2, le=5000)
     factor: Decimal = Field(default=Decimal(1), ge=Decimal("0.1"), le=Decimal(10))
     bars: int = Field(default=0, ge=-5000, le=5000)
-    timestamp: int | None = Field(default=None, ge=0)
-    visible_range: tuple[int, int] | None = None
+    timestamp: int | None = Field(default=None, ge=0, le=8640000000000000)
+    visible_range: ChartRange | None = None
     right_spacing: int | None = Field(default=None, ge=0, le=500)
 
 
 def chart_candles(chart: CloudChart, cache: MarketCache | None = None) -> list[Candle]:
+    from nanobot.charts.history import ChartHistory
+    try:
+        window = ChartHistory().get(chart)
+    except ValueError:
+        window = None
+    if window and window.candles and chart.visible_range and candle_time(window.candles[0]) <= chart.visible_range[0] and candle_time(window.candles[-1]) >= chart.visible_range[1]:
+        chart.data_revision = window.data_revision
+        return window.candles
     return (cache or MarketCache()).get(chart.provider_instrument, chart.canonical_instrument,
                                       chart.timeframe).candles
 
@@ -45,6 +53,9 @@ class ChartController:
 
     def view(self, chart: CloudChart, actor: ChartActor, revision: int,
              action: ViewOperation) -> CloudChart:
+        if action.operation == "reframe":
+            chart.history_window_id = None
+            chart.visible_range = None
         data = chart_candles(chart, self.cache)
         if not data:
             raise ValueError("Load market candles before operating the viewport")

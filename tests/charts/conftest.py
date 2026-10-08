@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from nanobot.charts.controller import ChartController, ViewOperation, candle_time, visible_candles
+from nanobot.charts.controller import ChartController
 from nanobot.charts.state import ChartActor, ChartService, CloudChart
 from nanobot.market.cache import CandleSeries, MarketCache
 from nanobot.market.models import Candle

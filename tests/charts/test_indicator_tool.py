@@ -46,6 +46,8 @@ async def test_factory_import_version_pin_and_control(workstation, tmp_path, mon
         upload.write_text(json.dumps(definition()))
         imported = json.loads(await tool.execute(operation="import", path=str(upload)))
         assert imported["source"] == "USER_IMPORTED" and imported["original_filename"] == upload.name
+        repeated = json.loads(await tool.execute(operation="import", path=str(upload)))
+        assert repeated["id"] == imported["id"]
         malicious = tmp_path / "bad.js"
         malicious.write_text("require('fs').readFileSync('/etc/passwd')")
         with pytest.raises(ValueError, match="scripts"):
@@ -53,3 +55,16 @@ async def test_factory_import_version_pin_and_control(workstation, tmp_path, mon
         upload.write_text('{"name":"bad","javascript":"fetch(secrets)"}')
         with pytest.raises(ValueError):
             await tool.execute(operation="import", path=str(upload))
+
+
+async def test_temporary_indicator_does_not_pollute_chart(workstation, tmp_path):
+    charts, _, actor, chart, _ = workstation
+    tool = ChartIndicatorTool(ToolContext(config=ToolsConfig(), workspace=str(tmp_path)))
+    tool.charts = charts
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key=actor.principal)):
+        state = json.loads(await tool.execute(operation="add", temporary=True, chart_id=chart.id, expected_revision=0, indicator_id="EMA"))
+        instance = state["temporary_indicator_instances"][0]
+        assert charts.records.get(chart.id).indicator_instances == []
+        await tool.execute(operation="update", chart_id=chart.id, expected_revision=0, instance_id=instance["id"], calc_params=[3, 6, 9])
+        await tool.execute(operation="remove", chart_id=chart.id, expected_revision=0, instance_id=instance["id"])
+    assert charts.records.get(chart.id).revision == 0

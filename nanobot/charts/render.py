@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from bisect import bisect_left
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -37,10 +38,13 @@ def render_scene(scene: ChartScene, width: int = 1000, height: int = 640) -> byt
         high += spread * 0.05
         spread = high - low
         times = [candle_time(c) for c in data]
-        span = max(times[-1] - times[0], 1)
 
         def x(timestamp: int) -> float:
-            return max(-width * 4, min(width * 4, left + (timestamp - times[0]) / span * (right - left)))
+            index = bisect_left(times, timestamp)
+            index = max(0, min(len(times) - 1, index))
+            if index and abs(times[index - 1] - timestamp) <= abs(times[index] - timestamp):
+                index -= 1
+            return left + index / max(len(times) - 1, 1) * (right - left)
 
         def y(price: float) -> float:
             return max(-height * 4, min(height * 4, bottom - (price - low) / spread * (bottom - top)))

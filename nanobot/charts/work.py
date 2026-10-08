@@ -5,6 +5,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from nanobot.charts.indicators import IndicatorInstance
 from nanobot.charts.state import Annotation, ChartPoint
 
 
@@ -12,9 +13,13 @@ from nanobot.charts.state import Annotation, ChartPoint
 class _Work:
     expires: float
     drawings: dict[str, Annotation] = field(default_factory=dict)
+    indicators: dict[str, IndicatorInstance] = field(default_factory=dict)
     cursor: ChartPoint | None = None
     drawing_tool: str | None = None
     presence_at: float = 0
+    user_cursor: ChartPoint | None = None
+    user_cursor_at: float = 0
+    user_cursor_pane: str = "candle_pane"
 
 
 _lock = threading.Lock()
@@ -78,3 +83,51 @@ def get_presence(chart_id: str, principal: str) -> tuple[ChartPoint | None, str 
         if entry is None or time.monotonic() - entry.presence_at > 5:
             return None, None
         return entry.cursor.model_copy(deep=True) if entry.cursor else None, entry.drawing_tool
+
+
+def temporary_indicators(chart_id: str, principal: str) -> list[IndicatorInstance]:
+    with _lock:
+        _expire()
+        entry = _work.get((chart_id, principal))
+        return [s.model_copy(deep=True) for s in entry.indicators.values()] if entry else []
+
+
+def put_temporary_indicator(chart_id: str, principal: str, instance: IndicatorInstance) -> None:
+    with _lock:
+        _expire()
+        key = (chart_id, principal)
+        if key not in _work and len(_work) >= 256:
+            raise ValueError("Chart analysis capacity exceeded")
+        entry = _work.setdefault(key, _Work(time.monotonic() + 600))
+        if len(entry.indicators) >= 20 and instance.id not in entry.indicators:
+            raise ValueError("Temporary indicator limit exceeded")
+        entry.indicators[instance.id] = instance.model_copy(deep=True)
+        entry.expires = time.monotonic() + 600
+
+
+def remove_temporary_indicator(chart_id: str, principal: str, instance_id: str) -> None:
+    with _lock:
+        entry = _work.get((chart_id, principal))
+        if entry:
+            entry.indicators.pop(instance_id, None)
+
+
+def report_user_cursor(chart_id: str, principal: str, point: ChartPoint | None, pane: str = "candle_pane") -> None:
+    with _lock:
+        _expire()
+        key = (chart_id, principal)
+        if key not in _work and len(_work) >= 256:
+            raise ValueError("Chart presence capacity exceeded")
+        entry = _work.setdefault(key, _Work(time.monotonic() + 600))
+        entry.user_cursor = point.model_copy(deep=True) if point else None
+        entry.user_cursor_at = time.monotonic()
+        entry.user_cursor_pane = pane
+
+
+def get_user_cursor(chart_id: str, principal: str) -> tuple[ChartPoint | None, int | None, str | None]:
+    with _lock:
+        _expire()
+        entry = _work.get((chart_id, principal))
+        if entry is None or entry.user_cursor is None:
+            return None, None, None
+        return entry.user_cursor.model_copy(deep=True), int((time.monotonic() - entry.user_cursor_at) * 1000), entry.user_cursor_pane

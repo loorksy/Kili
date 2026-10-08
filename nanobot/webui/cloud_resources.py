@@ -25,10 +25,12 @@ async def chart_snapshot(config: Config, chart_id: str, principal: str,
     if not candles:
         state: dict[str, object] = chart.model_dump(mode="json")
         from nanobot.charts.capabilities import DRAWING_ANCHORS
-        from nanobot.charts.work import temporary_drawings
+        from nanobot.charts.work import temporary_drawings, temporary_indicators
+        experiments = temporary_indicators(chart.id, principal)
+        state["temporary_indicator_instances"] = [s.model_dump(mode="json") for s in experiments]
         state["temporary_annotations"] = [a.model_dump(mode="json") for a in temporary_drawings(chart.id, principal)]
         state["drawing_tools"] = [{"id": name, "anchors": anchors} for name, anchors in DRAWING_ANCHORS.items()]
-        if any(instance.indicator_id.startswith("indicator_") for instance in chart.indicator_instances):
+        if any(instance.indicator_id.startswith("indicator_") for instance in [*chart.indicator_instances, *experiments]):
             from nanobot.charts.controller import candle_time
             from nanobot.charts.scene import build_scene
             custom_view = chart.model_copy(deep=True)
@@ -47,11 +49,24 @@ async def chart_snapshot(config: Config, chart_id: str, principal: str,
             chart.provider_instrument, chart.canonical_instrument, chart.timeframe, count=count, before=before)
     except ProviderUnavailableError:
         stale = True
-        series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
+        if chart.history_window_id:
+            from nanobot.charts.history import ChartHistory
+            series = ChartHistory().get(chart)
+        else:
+            series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
         data = cache.page(series, count, before)
         if not data:
             raise ValueError("Market history is unavailable") from None
-    series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
+    if chart.history_window_id:
+        from nanobot.charts.history import ChartHistory
+        history = ChartHistory()
+        series = history.get(chart)
+        original_times = {c.time for c in series.candles}
+        replacements = {c.time: c for c in data if c.time in original_times}
+        if replacements:
+            series = history.put(chart, [replacements.get(c.time, c) for c in series.candles])
+    else:
+        series = cache.get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe)
     return {"candles": [c.model_dump(mode="json") for c in data], "data_revision": series.data_revision,
             "chart_id": chart.id, "timeframe": chart.timeframe, "before": before, "stale": stale}
 
@@ -73,6 +88,8 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
         raise ValueError(str(result))
     if not parsed.chart_id:
         raise ValueError("Client changes require an existing chart id")
+    if parsed.operation == "report_crosshair":
+        return ChartService().get(parsed.chart_id, ChartActor(principal=principal)).model_dump(mode="json")
     return await chart_snapshot(config, parsed.chart_id, principal)
 
 

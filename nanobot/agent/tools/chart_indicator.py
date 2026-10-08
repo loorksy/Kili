@@ -24,11 +24,18 @@ from nanobot.charts.indicators import (
 )
 from nanobot.charts.native_indicators import native_values
 from nanobot.charts.state import ChartService
+from nanobot.charts.work import (
+    put_temporary_indicator,
+    remove_temporary_indicator,
+    temporary_indicators,
+)
+from nanobot.session.records import RecordStore
 
 
 class IndicatorRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["discover", "create", "import", "publish", "get_definition", "add", "update", "remove", "values"]
+    temporary: bool = False
     query: str = Field(default="", max_length=200)
     definition: IndicatorDefinition | None = None
     family_id: str | None = None
@@ -58,7 +65,7 @@ class ChartIndicatorTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Discover/search chart indicators, create a validated safe data-IR definition from the user's description, import JSON IR (never scripts), add/configure/remove chart indicators, or inspect exact custom indicator values. Definitions are immutable versions; edits need expected_revision."
+        return "Discover/search chart indicators, create a validated safe data-IR definition from the user's description, import JSON IR (never scripts), add/configure/remove chart indicators, or inspect numerical built-in/custom indicator values. Definitions are immutable versions; edits need expected_revision."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -79,7 +86,7 @@ class ChartIndicatorTool(Tool):
         if request.operation == "discover":
             custom = self.registry.search(principal, request.query)
             return json.dumps({"builtin": indicator_descriptors(request.query),
-                "custom": [{"id": r.id, "name": r.definition.name, "version": r.indicator_version, "source": r.source, "description": r.definition.description} for r in custom]})
+                "custom": [{"id": r.id, "name": r.definition.name, "version": r.indicator_version, "source": r.source, "description": r.definition.description, "scope": r.scope} for r in custom]})
         if request.operation in {"create", "import"}:
             definition = request.definition
             filename = None
@@ -115,7 +122,12 @@ class ChartIndicatorTool(Tool):
         if not request.chart_id:
             raise ValueError("Chart id is required")
         chart = self.charts.get(request.chart_id, actor)
-        instance = next((s for s in chart.indicator_instances if s.id == request.instance_id), None)
+        experiments = temporary_indicators(chart.id, actor.principal)
+        instance = next((s for s in [*chart.indicator_instances, *experiments] if s.id == request.instance_id), None)
+        existing_temporary = any(s.id == request.instance_id for s in experiments)
+        if request.temporary and instance is not None and not existing_temporary:
+            raise ValueError("Create a temporary copy instead of changing a durable indicator lifetime")
+        is_temporary = request.temporary or existing_temporary
         if request.operation == "values":
             if instance is None:
                 raise ValueError("Unknown indicator instance")
@@ -136,30 +148,42 @@ class ChartIndicatorTool(Tool):
             if request.object_revision is not None and instance.revision != request.object_revision:
                 raise ValueError("Indicator instance revision conflict")
         if request.operation == "remove":
-            chart.indicator_instances = [s for s in chart.indicator_instances if s.id != request.instance_id]
+            if is_temporary and instance:
+                with RecordStore.execution_write():
+                    remove_temporary_indicator(chart.id, actor.principal, instance.id)
+            else:
+                chart.indicator_instances = [s for s in chart.indicator_instances if s.id != request.instance_id]
         else:
             identifier = request.indicator_id or (instance.indicator_id if instance else None)
             if identifier is None:
                 raise ValueError("Indicator id is required")
             if identifier in BUILTIN_DEFAULTS:
-                params = request.calc_params or BUILTIN_DEFAULTS[identifier]
+                params = request.calc_params if "calc_params" in request.model_fields_set else instance.calc_params if instance else BUILTIN_DEFAULTS[identifier]
+                pane = "main" if identifier in {"MA", "EMA", "BOLL", "SAR"} else "separate"
                 if len(params) != len(BUILTIN_DEFAULTS[identifier]) or any(not 0 < p <= 512 for p in params):
                     raise ValueError("Invalid built-in indicator parameters")
             else:
                 record = self.registry.get(identifier, principal)
                 if chart.owner_scope == "SHARED" and record.scope != "SHARED":
                     raise PermissionError("Publish a shared indicator version before using it on a shared chart")
-                evaluate(record.definition, chart_candles(chart), request.parameters)
+                parameters = request.parameters if "parameters" in request.model_fields_set else instance.parameters if instance else {}
+                evaluate(record.definition, chart_candles(chart), parameters)
                 params = []
+                pane = record.definition.pane
             updated = IndicatorInstance(id=instance.id if instance else "study_" + uuid.uuid4().hex,
-                indicator_id=identifier, parameters=request.parameters, calc_params=params, pane=request.pane,
-                visible=request.visible, created_by=instance.created_by if instance else actor.worker_id or actor.principal,
+                indicator_id=identifier, parameters=request.parameters if "parameters" in request.model_fields_set else instance.parameters if instance else {}, calc_params=params,
+                pane=request.pane if "pane" in request.model_fields_set else instance.pane if instance else pane,
+                visible=request.visible if "visible" in request.model_fields_set else instance.visible if instance else True, created_by=instance.created_by if instance else actor.worker_id or actor.principal,
                 revision=instance.revision + 1 if instance else 0)
-            if instance:
+            if is_temporary:
+                with RecordStore.execution_write():
+                    put_temporary_indicator(chart.id, actor.principal, updated)
+            elif instance:
                 chart.indicator_instances = [updated if s.id == instance.id else s for s in chart.indicator_instances]
             else:
                 chart.indicator_instances.append(updated)
-        chart = self.charts.update(chart, actor, request.expected_revision)
+        if not is_temporary:
+            chart = self.charts.update(chart, actor, request.expected_revision)
         if self.ctx.bus:
             from nanobot.bus.events import OutboundMessage
             from nanobot.bus.outbound_events import CloudChartChanged
@@ -167,4 +191,6 @@ class ChartIndicatorTool(Tool):
             await self.ctx.bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content="",
                 event=CloudChartChanged(chart_id=chart.id, revision=chart.revision, annotation_revision=chart.annotation_revision, operation="indicator_" + request.operation,
                                        occurred_at=chart.updated_at)))
-        return chart.model_dump_json()
+        state = chart.model_dump(mode="json")
+        state["temporary_indicator_instances"] = [s.model_dump(mode="json") for s in temporary_indicators(chart.id, actor.principal)]
+        return json.dumps(state)

@@ -53,3 +53,25 @@ def test_old_annotation_provenance_is_conservative(workstation):
     saved.annotations = []
     with pytest.raises(PermissionError):
         service.update(saved, actor, saved.revision)
+
+
+def test_explicit_user_permission_can_allow_agent_edit(workstation):
+    service, _, actor, chart, _ = workstation
+    user = ChartActor(principal=actor.principal, user_interaction=True)
+    chart.annotations.append(Annotation(id="annotation_" + "d" * 32, type="note", points=[ChartPoint(value=100)], created_by=actor.principal, origin="USER"))
+    saved = service.update(chart, user, chart.revision)
+    saved.annotations[0].agent_editable = True
+    with pytest.raises(PermissionError):
+        service.update(saved, actor, saved.revision)
+    allowed = service.update(saved, user, saved.revision)
+    allowed.annotations[0].text = "User-authorized revision"
+    result = service.update(allowed, actor, allowed.revision)
+    assert result.annotations[0].text == "User-authorized revision"
+
+
+def test_legacy_type_cannot_smuggle_an_unbounded_library_overlay():
+    from nanobot.agent.tools.chart import ChartRequest
+    with pytest.raises(ValueError):
+        ChartRequest(operation="add_annotation", annotation_type="horizontal_line", drawing_name="anyWaves", points=[ChartPoint(value=100)])
+    with pytest.raises(ValueError):
+        Annotation(id="annotation_" + "e" * 32, type="horizontal_line", library_name="anyWaves", points=[ChartPoint(value=100)], created_by="model")

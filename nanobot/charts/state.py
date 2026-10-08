@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -20,6 +20,9 @@ from nanobot.charts.indicators import IndicatorInstance
 from nanobot.market.oanda import GRANULARITIES
 from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore, RuntimeRecord
+
+ChartTimestamp = Annotated[int, Field(ge=0, le=8640000000000000)]
+ChartRange = tuple[ChartTimestamp, ChartTimestamp]
 
 
 class ChartPoint(BaseModel):
@@ -43,6 +46,7 @@ class Annotation(BaseModel):
     library_name: str | None = None
     visible: bool = True
     locked: bool = False
+    agent_editable: bool = False
     origin: Literal["USER", "NANOBOT", "SUBAGENT", "IMPORT"] = "NANOBOT"
     text: str = Field(default="", max_length=2000)
     created_by: str
@@ -55,6 +59,8 @@ class Annotation(BaseModel):
 
     @model_validator(mode="after")
     def geometry(self) -> Annotation:
+        if self.library_name is not None and self.type != "drawing":
+            raise ValueError("Library overlays must use the drawing type")
         if self.type == "drawing":
             if self.library_name not in DRAWING_ANCHORS:
                 raise ValueError("Unavailable drawing tool")
@@ -95,9 +101,10 @@ class CloudChart(RuntimeRecord):
     timeframe: str
     # Additive workstation format: legacy charts receive deterministic defaults.
     workstation_version: Literal[1] = 1
+    history_window_id: str | None = None
     candle_count: int = Field(default=200, ge=2, le=5000)
     right_spacing: int = Field(default=40, ge=0, le=500)
-    visible_range: tuple[int, int] | None = None
+    visible_range: ChartRange | None = None
     layout: dict[str, JsonValue] = Field(default_factory=dict)
     indicator_instances: list[IndicatorInstance] = Field(default_factory=list, max_length=20)
     studies: list[str] = Field(default_factory=list, max_length=20)
@@ -145,6 +152,12 @@ class ChartService:
             chart.data_revision = MarketCache().get(chart.provider_instrument, chart.canonical_instrument, chart.timeframe).data_revision
         except ValueError:
             pass
+        if chart.history_window_id:
+            from nanobot.charts.history import ChartHistory
+            try:
+                chart.data_revision = ChartHistory().get(chart).data_revision
+            except ValueError:
+                pass
         return chart
 
     def create(self, actor: ChartActor, canonical: str, symbol: str, timeframe: str,
@@ -173,7 +186,9 @@ class ChartService:
             proposed = {a.id: a for a in chart.annotations}
             for annotation in current.annotations:
                 if annotation.origin in {"USER", "IMPORT"} and proposed.get(annotation.id) != annotation:
-                    raise PermissionError("User drawings require an explicit user edit")
+                    candidate = proposed.get(annotation.id)
+                    if not annotation.agent_editable or (candidate and candidate.agent_editable != annotation.agent_editable):
+                        raise PermissionError("User drawings require explicit user permission")
         for key in ("owner_scope", "owner_reference", "session_key", "linked_responsibility_id"):
             if getattr(current, key) != getattr(chart, key):
                 raise PermissionError("Chart ownership cannot change during an edit")

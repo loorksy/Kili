@@ -31,3 +31,21 @@ async def test_temporary_analysis_explicit_publication_and_object_cas(workstatio
         result = json.loads(await tool.execute(operation="get", chart_id=chart.id))
         assert result["annotations"][0]["revision"] == 1
         assert result["timeframe"] == "H4"
+
+
+async def test_crosshair_reports_are_backend_user_only(workstation, tmp_path):
+    service, _, actor, chart, _ = workstation
+    tool = ChartTool(ToolContext(config=ToolsConfig(), workspace=str(tmp_path)))
+    tool.service = service
+    model_context = RequestContext(channel="websocket", chat_id="main", session_key=actor.principal)
+    with request_context(model_context):
+        with pytest.raises(PermissionError, match="authenticated user"):
+            await tool.execute(operation="report_crosshair", chart_id=chart.id, points=[{"timestamp": 1000, "value": "100"}])
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key=actor.principal, attributes={"chart_user_interaction": True})):
+        await tool.execute(operation="report_crosshair", chart_id=chart.id, points=[{"timestamp": 1000, "value": "100"}])
+    with request_context(model_context):
+        state = json.loads(await tool.execute(operation="inspect_presence", chart_id=chart.id))
+        assert state["user_crosshair"] == {"timestamp": 1000, "value": "100"}
+        assert state["user_crosshair_pane"] == "candle_pane"
+        assert state["cursor"] is None
+    assert service.records.get(chart.id).revision == 0

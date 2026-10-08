@@ -25,6 +25,7 @@ class SnapshotRequest(BaseModel):
 
 
 class ChartSnapshotTool(Tool):
+    action_class = "read"
     _scopes = {"core", "subagent"}
 
     def __init__(self, ctx: ToolContext):
