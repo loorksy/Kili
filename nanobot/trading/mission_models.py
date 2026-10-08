@@ -6,7 +6,7 @@ import json
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from nanobot.session.records import RuntimeRecord
 from nanobot.trading.metaapi import AccountState, BrokerItem
@@ -171,6 +171,7 @@ class RiskReservation(RuntimeRecord):
     entry_kind: Literal["market", "pending"] | None = None
     state: Literal["RESERVED", "ACTIVE", "UNCERTAIN", "RELEASED"] = "RESERVED"
     provider_reference: str | None = None
+    assessment: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class RiskAssessment(BaseModel):

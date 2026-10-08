@@ -19,7 +19,7 @@ from nanobot.security.secrets import SecretStore
 
 
 class AccountState(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
     broker: str
     currency: str
     balance: Decimal
@@ -27,10 +27,12 @@ class AccountState(BaseModel):
     margin: Decimal = Decimal(0)
     free_margin: Decimal = Field(default=Decimal(0), alias="freeMargin")
     trade_allowed: bool = Field(default=False, alias="tradeAllowed")
+    margin_mode: str | None = Field(default=None, alias="marginMode")
+    platform: str | None = None
 
 
 class BrokerItem(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
     id: str
     symbol: str
     type: str
@@ -41,10 +43,16 @@ class BrokerItem(BaseModel):
     open_price: Decimal | None = Field(default=None, alias="openPrice")
     stop_loss: Decimal | None = Field(default=None, alias="stopLoss")
     take_profit: Decimal | None = Field(default=None, alias="takeProfit")
+    profit: Decimal | None = None
+    swap: Decimal = Decimal(0)
+    commission: Decimal = Decimal(0)
+    current_price: Decimal | None = Field(default=None, alias="currentPrice")
+    time: str | None = None
+    expiration_time: str | None = Field(default=None,alias="expirationTime")
 
 
 class SymbolSpec(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
     symbol: str
     digits: int = Field(ge=0, le=12)
     min_volume: Decimal = Field(alias="minVolume", gt=0)
@@ -54,14 +62,36 @@ class SymbolSpec(BaseModel):
     currency_base: str | None = Field(default=None, alias="currencyBase")
     currency_profit: str | None = Field(default=None, alias="currencyProfit")
     contract_size: Decimal | None = Field(default=None, alias="contractSize")
+    tick_size: Decimal | None = Field(default=None, alias="tickSize", gt=0)
+    order_mode: list[str] | None = Field(default=None,alias="orderMode")
 
 
 class BrokerPrice(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
     symbol: str
     bid: Decimal
     ask: Decimal
     time: str
+    loss_tick_value: Decimal | None = Field(default=None, alias="lossTickValue", gt=0)
+
+
+class BrokerDeal(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
+    id: str
+    position_id: str | None = Field(default=None, alias="positionId")
+    order_id: str | None = Field(default=None, alias="orderId")
+    client_id: str | None = Field(default=None, alias="clientId")
+    type: str
+    profit: Decimal
+    commission: Decimal = Decimal(0)
+    swap: Decimal = Decimal(0)
+    time: str
+    entry_type: str | None = Field(default=None,alias="entryType")
+
+
+class MarginEstimate(BaseModel):
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+    margin: Decimal = Field(ge=0)
 
 
 class AccountConnection(BaseModel):
@@ -166,16 +196,34 @@ class MetaApiClient:
         except ValidationError:
             raise ProviderUnavailableError("MetaApi returned invalid history data") from None
 
+    async def history_deals(self, start: str, end: str) -> list[BrokerDeal]:
+        data = await self._request("GET", self.account_path + f"/history-deals/time/{quote(start, safe='')}/{quote(end, safe='')}")
+        try:
+            return TypeAdapter(list[BrokerDeal]).validate_python(data)
+        except ValidationError:
+            raise ProviderUnavailableError("MetaApi returned invalid deal data") from None
+
+    async def calculate_margin(self, symbol: str, side: str, volume: Decimal, price: Decimal) -> Decimal:
+        self.validate_symbol(symbol)
+        if side not in {"buy", "sell"} or not volume.is_finite() or volume <= 0:
+            raise ValueError("Invalid margin request")
+        # A fixed read-only broker calculation, not a trading mutation.
+        body = '{"symbol":' + json.dumps(symbol) + ',"type":' + json.dumps("ORDER_TYPE_" + side.upper()) + ',"volume":' + format(volume,"f") + ',"openPrice":' + format(price,"f") + '}'
+        return parse_provider(MarginEstimate, await self._request("POST", self.account_path + "/calculate-margin", body=body)).margin
+
     async def mutate(self, payload: dict[str, JsonValue], *, effect: Effect, journal: ActionStore) -> TradeResponse:
         grant = current_authorized_action()
         owned = journal.get_effect(effect.id)
         if (grant is None or grant.action.fingerprint != effect.fingerprint
                 or owned.token != effect.token or owned.generation != effect.generation
-                or owned.state != "STARTED" or not owned.approval_id
+                or owned.state != "STARTED" or not (owned.approval_id or owned.mandate_id)
                 or grant.action.parameters.get("broker_request") != payload
                 or grant.action.parameters.get("account_id") != self.connection.account_id):
             raise PermissionError("MetaApi mutation lacks exact gateway effect authorization")
         journal.validate_effect_owner(owned)
+        if owned.mandate_id:
+            from nanobot.trading.missions import validate_delegated_outbound
+            validate_delegated_outbound(journal,owned)
         # Numeric JSON is encoded from validated decimal strings without float conversion.
         numeric = {"volume", "openPrice", "stopLoss", "takeProfit"}
         fields: list[str] = []

@@ -18,6 +18,7 @@ from nanobot.security.actions import (
     now_ms,
 )
 from nanobot.session.records import RecordStore, RuntimeRecord
+from nanobot.trading.delegation import MandateAuthority
 from nanobot.trading.metaapi import ProviderRejectedError
 from nanobot.trading.proposals import TradePreview, TradeProposals
 
@@ -31,6 +32,14 @@ class TradeJournalEntry(RuntimeRecord):
     kind: str
     provider_reference: str | None = None
     evidence_refs: list[str] = Field(default_factory=list)
+    mandate_id: str | None = None
+    goal_id: str | None = None
+    plan_id: str | None = None
+    risk_reservation_id: str | None = None
+    autonomous: bool = False
+    plan_version: int | None = None
+    mission_pnl: str | None = None
+    risk_assessment: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 def current_effect_owner() -> EffectOwner | None:
@@ -50,10 +59,11 @@ def current_effect_owner() -> EffectOwner | None:
 
 class TradeExecutor:
     def __init__(self, proposals: TradeProposals, effects: ActionStore | None = None,
-                 journal: RecordStore[TradeJournalEntry] | None = None):
+                 journal: RecordStore[TradeJournalEntry] | None = None, *, live_enabled: bool = False):
         self.proposals = proposals
         self.effects = effects or ActionStore()
         self.journal = journal or RecordStore("trade_journal",TradeJournalEntry,self.effects)
+        self.authority = MandateAuthority(proposals,live_enabled=live_enabled)
 
     def record(self, preview: TradePreview, kind: str, effect: Effect | None = None) -> None:
         logger.info("Trading transition kind={} proposal={} preview={} effect={} responsibility={}",
@@ -65,10 +75,18 @@ class TradeExecutor:
             return
         except ValueError:
             pass
+        mandate = self.authority.missions.mandates.get(preview.mandate_id) if preview.mandate_id else None
+        reservation = self.authority.missions.reservations.get(effect.reservation_id) if effect and effect.reservation_id else None
         self.journal.create(TradeJournalEntry(id=entry_id,proposal_id=preview.proposal_id,
             responsibility_id=preview.responsibility_id,preview_id=preview.id,
             approval_id=effect.approval_id if effect else None, effect_id=effect.id if effect else None,
-            kind=kind,provider_reference=effect.provider_reference if effect else None))
+            kind=kind,provider_reference=effect.provider_reference if effect else None,
+            mandate_id=preview.mandate_id,plan_id=preview.plan_id,
+            goal_id=self.authority.missions.mandates.get(preview.mandate_id).goal_id if preview.mandate_id else None,
+            risk_reservation_id=effect.reservation_id if effect else None,autonomous=bool(effect and effect.mandate_id),
+            plan_version=self.authority.missions.plans.get(preview.plan_id).plan_version if preview.plan_id else None,
+            mission_pnl=str(mandate.realized_pnl+mandate.unrealized_pnl) if mandate else None,
+            risk_assessment=reservation.assessment if reservation else {}))
 
     @staticmethod
     def public_effect(effect: Effect) -> dict[str, JsonValue]:
@@ -93,16 +111,21 @@ class TradeExecutor:
             return self.public_effect(effect)
         if now_ms() >= preview.expires_at:
             raise ValueError("Trade preview expired; new preview and approval required")
-        await self.proposals.validate_current(preview.intent,preview.broker_symbol)
+        await self.proposals.validate_current(preview.intent,preview.broker_symbol,mandate_id=preview.mandate_id)
         self.proposals.require_preview(preview_id,principal)  # No replaced preview during remote validation.
         owner = current_effect_owner()
-        effect = self.effects.start_effect(effect.id,approval_id=authorization.approval_id,owner=owner)
+        delegated = await self.authority.evaluate(authorization.action) if preview.mandate_id else None
+        effect = self.effects.start_effect(effect.id,approval_id=authorization.approval_id,owner=owner,delegation=delegated)
         self.record(preview,"STARTED",effect)
         state: Literal["SUCCEEDED","FAILED","UNCERTAIN"] = "UNCERTAIN"
         result: JsonValue = None
         reference: str | None = None
         try:
-            response = await self.proposals.client.mutate(preview.broker_request, effect=effect, journal=self.effects)
+            if preview.mandate_id and self.authority.missions.mandates.get(preview.mandate_id).envelope.mode == "SIMULATION":
+                from nanobot.trading.simulation import MissionSimulation
+                response = await MissionSimulation(self.authority.missions,self.authority.missions.mandates.get(preview.mandate_id)).execute(preview,effect)
+            else:
+                response = await self.proposals.client.mutate(preview.broker_request, effect=effect, journal=self.effects)
             reference = response.order_id or response.position_id
             result = response.model_dump(mode="json")
             if response.string_code in {"TRADE_RETCODE_DONE","TRADE_RETCODE_PLACED","TRADE_RETCODE_DONE_PARTIAL"}:
@@ -140,6 +163,18 @@ class TradeExecutor:
         preview = self.proposals.previews.get(preview_id)
         claimed = self.effects.claim_reconciliation(effect_id,owner=current_effect_owner())
         self.record(preview,"RECONCILING",claimed)
+        if preview.mandate_id:
+            mandate = self.authority.missions.mandates.get(preview.mandate_id)
+            if mandate.envelope.mode == "SIMULATION":
+                from nanobot.trading.simulation import MissionSimulation
+                receipt = MissionSimulation(self.authority.missions,mandate).get().receipts.get(effect.id)
+                finished = self.effects.finish_effect(claimed,state="SUCCEEDED" if receipt else "UNCERTAIN",
+                    result=receipt.model_dump(mode="json") if receipt else {"message":"No exact simulation receipt; outcome remains uncertain"},
+                    provider_reference=(receipt.position_id or receipt.order_id) if receipt else None)
+                with self.effects.owner_scope(finished.owner):
+                    self.record(preview,finished.state,finished)
+                    self._update_proposal(preview,finished)
+                return self.public_effect(finished)
         state: Literal["SUCCEEDED","FAILED","UNCERTAIN"] = "UNCERTAIN"
         reference: str | None = None
         try:

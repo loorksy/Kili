@@ -19,6 +19,7 @@ class ProposalRequest(BaseModel):
     rationale_summary: str = ""
     evidence_refs: list[str] = []
     chart_refs: list[str] = []
+    mandate_id: str | None = None
 
 
 class TradePrepareTool(Tool):
@@ -57,7 +58,8 @@ class TradePrepareTool(Tool):
                 raise ValueError("Structured trade intent is required")
             record = self.service.create(context.session_key, request.intent,
                 responsibility_id=next(iter(context.responsibility_scope.executions),None),
-                rationale=request.rationale_summary,evidence=request.evidence_refs,charts=request.chart_refs)
+                rationale=request.rationale_summary,evidence=request.evidence_refs,charts=request.chart_refs,
+                mandate_id=request.mandate_id)
             return record.model_dump_json()
         if not request.proposal_id:
             raise ValueError("Proposal id is required")

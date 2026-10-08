@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
+from nanobot.trading.delegation import MandateAuthority
 from nanobot.trading.execution import TradeExecutor
 from nanobot.trading.metaapi import MetaApiClient
 from nanobot.trading.proposals import TradeProposals
@@ -57,11 +58,14 @@ class TradeExecuteTool(Tool):
     def create(cls, ctx: ToolContext) -> TradeExecuteTool:
         connection = ctx.config.integrations.metaapi
         assert connection is not None
-        return cls(TradeExecutor(TradeProposals(MetaApiClient(connection))))
+        return cls(TradeExecutor(TradeProposals(MetaApiClient(connection)),live_enabled=ctx.config.integrations.autonomous_trading_enabled))
 
     def action_parameters(self, params: dict[str, Any]) -> dict[str, Any]:
         request = ExecuteRequest.model_validate(params)
         return self.executor.proposals.require_preview(request.preview_id,principal()).material_action()
+
+    def action_authority(self) -> MandateAuthority:
+        return self.executor.authority
 
     async def execute(self, **kwargs: Any) -> str:
         request = ExecuteRequest.model_validate(kwargs)

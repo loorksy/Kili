@@ -54,6 +54,8 @@ class TradeProposal(RuntimeRecord):
     status: Literal["PROPOSED", "PREVIEWED", "EXECUTED", "FAILED", "UNCERTAIN"] = "PROPOSED"
     preview_id: str | None = None
     effect_id: str | None = None
+    mandate_id: str | None = None
+    plan_id: str | None = None
 
 
 class TradePreview(RuntimeRecord):
@@ -71,14 +73,20 @@ class TradePreview(RuntimeRecord):
     expires_at: int
     broker_request: dict[str, JsonValue]
     effect_key: str
+    mandate_id: str | None = None
+    mandate_fingerprint: str | None = None
+    plan_id: str | None = None
 
     def material_action(self) -> dict[str, JsonValue]:
-        return {"preview_id": self.id, "proposal_id": self.proposal_id,
+        result: dict[str, JsonValue] = {"preview_id": self.id, "proposal_id": self.proposal_id,
                 "responsibility_id": self.responsibility_id,
                 "account_id": self.account_id, "canonical_instrument": self.canonical_instrument,
                 "broker_symbol": self.broker_symbol, "mapping_revision": self.mapping_revision,
                 "intent": self.intent.model_dump(mode="json"),
                 "broker_request": self.broker_request, "effect_key": self.effect_key}
+        if self.mandate_id is not None:
+            result.update(mandate_id=self.mandate_id,mandate_fingerprint=self.mandate_fingerprint,plan_id=self.plan_id)
+        return result
 
 
 class TradeProposals:
@@ -95,13 +103,24 @@ class TradeProposals:
             raise PermissionError("Trade record belongs to another conversation")
 
     def create(self, principal: str, intent: TradeIntent, *, responsibility_id: str | None = None,
-               rationale: str = "", evidence: list[str] | None = None, charts: list[str] | None = None) -> TradeProposal:
+               rationale: str = "", evidence: list[str] | None = None, charts: list[str] | None = None,
+               mandate_id: str | None = None, proposal_id: str | None = None) -> TradeProposal:
         # Missing/ambiguous mappings stop before a proposal can target execution.
         self.mappings.require(self.client.connection.account_id, intent.canonical_instrument)
-        record = self.proposals.create(TradeProposal(id="proposal_" + uuid.uuid4().hex,
+        plan_id: str | None = None
+        if mandate_id is not None:
+            from nanobot.trading.mission_models import TradingMandate
+            mandate = RecordStore("trading_mandates",TradingMandate,self.proposals.journal).get(mandate_id)
+            self.require_owner(principal,mandate.principal)
+            if responsibility_id != mandate.responsibility_id:
+                raise PermissionError("Delegated proposal requires its owning responsibility")
+            plan_id = mandate.plan_id
+            if intent.operation == "open" and intent.order_type != "market" and intent.expiration_time is None:
+                intent = intent.model_copy(update={"expiration_time":datetime.fromtimestamp(mandate.envelope.expires_at/1000,timezone.utc).isoformat()})
+        record = self.proposals.create(TradeProposal(id=proposal_id or "proposal_" + uuid.uuid4().hex,
             principal=principal, responsibility_id=responsibility_id,
             account_id=self.client.connection.account_id, intent=intent,
-            rationale_summary=rationale, evidence_refs=evidence or [], chart_refs=charts or []))
+            rationale_summary=rationale, evidence_refs=evidence or [], chart_refs=charts or [],mandate_id=mandate_id,plan_id=plan_id))
         self.record_lifecycle(record, "PROPOSED")
         return record
 
@@ -130,7 +149,7 @@ class TradeProposals:
             if price is not None and price != price.quantize(Decimal(1).scaleb(-spec.digits)):
                 raise ValueError("Price precision violates broker specification")
 
-    async def validate_current(self, intent: TradeIntent, symbol: str) -> tuple[AccountState, SymbolSpec, BrokerPrice]:
+    async def validate_current(self, intent: TradeIntent, symbol: str, *, mandate_id: str | None = None) -> tuple[AccountState, SymbolSpec, BrokerPrice]:
         connection = await self.client.connection_state()
         if connection.id != self.client.connection.account_id or connection.connection_status != "CONNECTED":
             raise ValueError("Trading account is not connected")
@@ -154,6 +173,14 @@ class TradeProposals:
         if intent.operation != "open":
             kind = "orders" if intent.operation in {"modify_order", "cancel_order"} else "positions"
             targets = await self.client.items(kind)
+            if mandate_id:
+                from nanobot.trading.missions import TradingMissions
+                from nanobot.trading.simulation import MissionSimulation
+                service = TradingMissions(self.client,self.proposals.journal)
+                mandate = service.mandates.get(mandate_id)
+                if mandate.envelope.mode == "SIMULATION":
+                    book = MissionSimulation(service,mandate).get()
+                    targets.extend(book.orders if kind == "orders" else book.positions)
             target = next((p for p in targets if p.id == intent.target_id), None)
             if target is None or target.symbol != symbol:
                 raise ValueError("Exact broker target does not match this instrument")
@@ -166,6 +193,8 @@ class TradeProposals:
             "modify_position": "POSITION_MODIFY", "modify_order": "ORDER_MODIFY",
             "cancel_order": "ORDER_CANCEL", "close_position": "POSITION_CLOSE_ID",
         }[intent.operation]
+        if intent.operation == "close_position" and intent.volume is not None:
+            action_type = "POSITION_PARTIAL"
         payload: dict[str, JsonValue] = {"actionType": action_type, "symbol": symbol,
                                        "clientId": "nb" + hashlib.sha256(effect_key.encode()).hexdigest()[:20]}
         if intent.target_id:
@@ -195,16 +224,23 @@ class TradeProposals:
         if proposal.account_id != self.client.connection.account_id:
             raise ValueError("Connected account changed; create a new proposal")
         mapping = self.mappings.require(proposal.account_id, proposal.intent.canonical_instrument)
-        account, spec, price = await self.validate_current(proposal.intent, mapping.provider_symbol)
+        account, spec, price = await self.validate_current(proposal.intent, mapping.provider_symbol,mandate_id=proposal.mandate_id)
         preview_id = "preview_" + uuid.uuid4().hex
         key = f"trade:{proposal.id}:{preview_id}"
+        mandate_fingerprint: str | None = None
+        if proposal.mandate_id:
+            from nanobot.trading.mission_models import TradingMandate
+            mandate = RecordStore("trading_mandates",TradingMandate,self.proposals.journal).get(proposal.mandate_id)
+            if mandate.plan_id != proposal.plan_id:
+                raise ValueError("Plan was revised; create a new proposal")
+            mandate_fingerprint = mandate.scope_fingerprint
         record = self.previews.create(TradePreview(id=preview_id, proposal_id=proposal.id,
             principal=principal, responsibility_id=proposal.responsibility_id,
             account_id=proposal.account_id, canonical_instrument=proposal.intent.canonical_instrument,
             broker_symbol=mapping.provider_symbol, mapping_revision=mapping.revision,
             intent=proposal.intent, account=account, specification=spec, broker_price=price,
             expires_at=now_ms() + 600_000, broker_request=self.broker_request(proposal.intent,mapping.provider_symbol,key),
-            effect_key=key))
+            effect_key=key,mandate_id=proposal.mandate_id,mandate_fingerprint=mandate_fingerprint,plan_id=proposal.plan_id))
         proposal.preview_id, proposal.status = record.id, "PREVIEWED"
         self.proposals.save(proposal)
         self.record_lifecycle(proposal, "PREVIEWED", record.id)

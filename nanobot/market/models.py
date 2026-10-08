@@ -21,6 +21,7 @@ class IntegrationsConfig(Base):
     oanda: Connection | None = None
     metaapi: Connection | None = None
     charts_enabled: bool = False
+    autonomous_trading_enabled: bool = False
 
 
 class Instrument(BaseModel):

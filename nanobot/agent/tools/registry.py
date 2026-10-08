@@ -224,7 +224,7 @@ class ToolRegistry:
             "parameters": canonical, "principal": principal,
             "responsibility_id": canonical.get("responsibility_id", next(iter(ctx.responsibility_scope.executions), None) if ctx else None),
         })
-        refusal = await self.policy.authorize(action)
+        refusal = await self.policy.authorize(action, authority=tool.action_authority())
         if refusal:
             return ToolResult.error(refusal)
         # Review may await a remote provider. Recheck fencing before side effects.

@@ -13,6 +13,7 @@ if typing.TYPE_CHECKING:
 
     from nanobot.agent.tools.context import ToolContext
     from nanobot.runtime_context import RuntimeContextProvider
+    from nanobot.security.actions import ActionAuthority
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
@@ -184,6 +185,10 @@ class ToolResult(str):
 
 
 class Tool(ABC):
+    def action_authority(self) -> ActionAuthority | None:
+        """Optional trusted prior-delegation evaluator, invoked only by central policy."""
+        return None
+
     """Agent capability: read files, run commands, etc."""
 
     # Static gateway classification, never controlled by model parameters.
