@@ -1,13 +1,13 @@
 /** The only SolidJS/library boundary. All durable data comes from Nanobot. */
 import { KLineChartPro, type Datafeed } from "@klinecharts/pro";
-import { init, registerIndicator, type Overlay } from "klinecharts";
+import { ActionType, DomPosition, init, registerIndicator, type Overlay } from "klinecharts";
 import "@klinecharts/pro/dist/klinecharts-pro.css";
 import type { CloudChartState } from "./contract";
 
 const recentActions = new WeakMap<HTMLElement, CustomEvent>();
 
 export interface DrawingEdit { id?: string; object_revision?: number; name: string; points: { timestamp: number; value: string }[] }
-export interface ChartInteraction { selectedTool?: string; onDrawing?: (drawing: DrawingEdit) => void }
+export interface ChartInteraction { selectedTool?: string; onDrawing?: (drawing: DrawingEdit) => void; onCrosshair?: (point?: { timestamp: number; value: string; pane: string }) => void }
 export function mountCloudChart(container: HTMLElement, state: CloudChartState, datafeed: Datafeed, interaction: ChartInteraction = {}): () => void {
   const calendar: Record<string, [number, string]> = { D: [1, "day"], W: [1, "week"], M: [1, "month"] };
   const unit = /^([SMH])(\d+)$/.exec(state.timeframe);
@@ -24,11 +24,23 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
         const core = getCore();
         const [from, to] = range;
         const visible = data.filter(candle => candle.timestamp >= from && candle.timestamp <= to);
-        if (core && visible.length) { core.setBarSpace(container.clientWidth / visible.length); core.scrollToTimestamp(to, 0); }
+        if (core && visible.length) { core.setBarSpace(Math.max(1, (core.getSize("candle_pane", DomPosition.Main)?.width ?? container.clientWidth) - (state.right_spacing ?? 40)) / visible.length); core.scrollToTimestamp(to, 0); core.scrollByDistance(-(state.right_spacing ?? 40), 0); }
       }, 0);
       return data;
     } } });
   let disposed = false;
+  let lastCrosshair = 0;
+  const crosshair = (value: unknown) => {
+    if (!value || typeof value !== "object" || !("x" in value) || !("y" in value) || typeof value.x !== "number" || typeof value.y !== "number") { interaction.onCrosshair?.(); return; }
+    if (Date.now() - lastCrosshair < 1000) return;
+    lastCrosshair = Date.now();
+    const core = getCore();
+    if (!core) return;
+    const pane = "paneId" in value && typeof value.paneId === "string" ? value.paneId : "candle_pane";
+    const converted = core.convertFromPixel([{ x: value.x, y: value.y }], { paneId: pane, absolute: false });
+    const point = Array.isArray(converted) ? converted[0] : converted;
+    if (point && typeof point.timestamp === "number" && typeof point.value === "number" && Number.isFinite(point.value)) interaction.onCrosshair?.({ timestamp: point.timestamp, value: String(point.value), pane });
+  };
   const getCore = () => {
     const widget = container.querySelector<HTMLElement>(".klinecharts-pro-widget");
     const coreId = widget?.getAttribute("k-line-chart-id");
@@ -39,9 +51,10 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     if (disposed) return;
     const core = getCore();
     if (!core) return;
+    core.subscribeAction(ActionType.OnCrosshairChange, crosshair);
     core.setOffsetRightDistance(state.right_spacing ?? 40);
-    if (!state.visible_range) core.setBarSpace(container.clientWidth / (state.candle_count ?? 200));
-    for (const instance of state.indicator_instances ?? []) {
+    if (!state.visible_range) core.setBarSpace(Math.max(1, (core.getSize("candle_pane", DomPosition.Main)?.width ?? container.clientWidth) - (state.right_spacing ?? 40)) / (state.candle_count ?? 200));
+    for (const instance of [...(state.indicator_instances ?? []), ...(state.temporary_indicator_instances ?? [])]) {
       if (!instance.visible) continue;
       if (instance.indicator_id.startsWith("indicator_")) {
         const outputs = (state.computed_series ?? []).filter(s => s.instance_id === instance.id);
@@ -87,15 +100,16 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     const anchors: [number, string][] = event.detail.anchors ?? [];
     cursor.style.display = "block";
     cursor.textContent = "➤ Nanobot · " + event.detail.operation.replaceAll("_", " ");
+    const delay = state.layout?.agent_animation_mode === "instant" ? 0 : state.layout?.agent_animation_mode === "normal" ? 240 : 120;
     for (const [index, anchor] of anchors.entries()) {
       window.setTimeout(() => {
         if (disposed) return;
         const point = core.convertToPixel({ timestamp: anchor[0], value: Number(anchor[1]) }, { paneId: "candle_pane", absolute: true });
         if (!Array.isArray(point) && typeof point.x === "number" && typeof point.y === "number") cursor.style.transform = `translate(${point.x}px, ${point.y}px)`;
-      }, index * 120);
+      }, index * delay);
     }
     if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { cursor.style.display = "none"; }, Math.min(1800, anchors.length * 120 + 700));
+    hideTimer = setTimeout(() => { cursor.style.display = "none"; }, Math.min(1800, anchors.length * delay + 700));
   };
   window.addEventListener("nanobot-cloud-chart-updated", replay);
   const recent = recentActions.get(container);
@@ -105,6 +119,8 @@ export function mountCloudChart(container: HTMLElement, state: CloudChartState, 
     if (hideTimer) clearTimeout(hideTimer);
     disposed = true;
     window.clearTimeout(timer);
+    getCore()?.unsubscribeAction(ActionType.OnCrosshairChange, crosshair);
+    interaction.onCrosshair?.();
     pro.destroy();
     container.replaceChildren();
   };

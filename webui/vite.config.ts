@@ -130,7 +130,7 @@ export default defineConfig(({ mode }) => {
       dedupe: ["react", "react-dom", "lucide-react", "react-i18next", "qrcode"],
     },
     optimizeDeps: {
-      exclude: ["@klinecharts/pro"],
+      exclude: ["@klinecharts/pro", "klinecharts"],
       // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
       // it splits its layer/focus state from optimized Popover and DropdownMenu,
       // so nested overlays can dismiss the wrong layer in development.

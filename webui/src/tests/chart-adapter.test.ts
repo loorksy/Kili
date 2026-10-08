@@ -3,8 +3,8 @@ import { mountCloudChart } from "@/components/charts/pro-adapter";
 import type { CloudChartState } from "@/components/charts/contract";
 import type { Datafeed } from "@klinecharts/pro";
 
-const mocks = vi.hoisted(() => ({ core: { setOffsetRightDistance: vi.fn(), setBarSpace: vi.fn(),
-  createOverlay: vi.fn(), createIndicator: vi.fn(), getDataList: vi.fn(() => [{ timestamp: 1000 }]),
+const mocks = vi.hoisted(() => ({ core: { getSize: vi.fn(() => ({ width: 800 })), scrollByDistance: vi.fn(), scrollToTimestamp: vi.fn(), setOffsetRightDistance: vi.fn(), setBarSpace: vi.fn(),
+  subscribeAction: vi.fn(), unsubscribeAction: vi.fn(), convertFromPixel: vi.fn(() => [{ timestamp: 1000, value: 2700 }]), createOverlay: vi.fn(), createIndicator: vi.fn(), getDataList: vi.fn(() => [{ timestamp: 1000 }]),
   convertToPixel: vi.fn(() => ({ x: 50, y: 80 })) }, destroy: vi.fn(), register: vi.fn() }));
 vi.mock("@klinecharts/pro", () => ({ KLineChartPro: class {
   constructor(options: { container: HTMLElement }) {
@@ -13,7 +13,7 @@ vi.mock("@klinecharts/pro", () => ({ KLineChartPro: class {
   }
   destroy() { mocks.destroy(); }
 } }));
-vi.mock("klinecharts", () => ({ init: () => mocks.core, registerIndicator: mocks.register }));
+vi.mock("klinecharts", () => ({ DomPosition: { Main: "main" }, ActionType: { OnCrosshairChange: "onCrosshairChange" }, init: () => mocks.core, registerIndicator: mocks.register }));
 const state: CloudChartState = { id: `chart_${"a".repeat(32)}`, revision: 0, canonical_instrument: "gold",
   provider_instrument: "XAU_USD", timeframe: "H1", session_key: "websocket:main", studies: [], annotations: [], candle_count: 100 };
 const feed: Datafeed = { searchSymbols: async () => [], getHistoryKLineData: async () => [], subscribe: () => {}, unsubscribe: () => {} };
@@ -36,6 +36,19 @@ describe("Chart semantic adapter", () => {
     const stopAgain = mountCloudChart(container, state, feed); vi.runOnlyPendingTimers();
     expect(container.querySelector<HTMLElement>('[aria-label="Nanobot chart cursor"]')?.style.display).toBe("none");
     stopAgain(); container.remove();
+  });
+  it("reports the user's semantic crosshair without moving the agent cursor", () => {
+    const container = document.createElement("div");
+    const onCrosshair = vi.fn();
+    const stop = mountCloudChart(container, state, feed, { onCrosshair });
+    vi.runOnlyPendingTimers();
+    const callback = mocks.core.subscribeAction.mock.calls[0][1];
+    callback({ x: 40, y: 80, paneId: "candle_pane" });
+    expect(mocks.core.convertFromPixel).toHaveBeenCalledWith([{ x: 40, y: 80 }], { paneId: "candle_pane", absolute: false });
+    expect(onCrosshair).toHaveBeenCalledWith({ timestamp: 1000, value: "2700", pane: "candle_pane" });
+    expect(container.querySelector<HTMLElement>('[aria-label="Nanobot chart cursor"]')?.style.display).toBe("none");
+    stop();
+    expect(mocks.core.unsubscribeAction).toHaveBeenCalled();
   });
   it("projects saved semantic drawings and separate indicator panes", () => {
     const container = document.createElement("div");

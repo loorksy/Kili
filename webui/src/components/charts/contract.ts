@@ -8,6 +8,7 @@ export interface ChartAnnotation {
   visible?: boolean;
   locked?: boolean;
   origin?: string;
+  agent_editable?: boolean;
   revision?: number;
   points: { timestamp: number | null; value: string }[];
 }
@@ -22,6 +23,8 @@ export interface CloudChartState {
   temporary_annotations?: ChartAnnotation[];
   studies: string[];
   indicator_instances?: { id: string; indicator_id: string; calc_params: number[]; pane: "main" | "separate"; visible: boolean }[];
+  temporary_indicator_instances?: NonNullable<CloudChartState["indicator_instances"]>;
+  layout?: { agent_animation_mode?: "normal" | "fast" | "instant" };
   computed_series?: { instance_id: string; name: string; kind: string; pane: string; color: string; values: (string | null)[] }[];
   computed_timestamps?: number[];
   drawing_tools?: { id: string; anchors: number }[];
