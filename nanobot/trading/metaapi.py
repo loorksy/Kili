@@ -13,13 +13,22 @@ from typing import Literal
 from urllib.parse import quote, unquote
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
 
 from nanobot.market.models import Connection
 from nanobot.market.provider import ProviderUnavailableError, parse_provider
 from nanobot.security.actions import ActionStore, Effect, current_authorized_action
 from nanobot.security.network import PinnedDNSAsyncTransport, httpx_env_proxy_mounts
 from nanobot.security.secrets import SecretStore
+from nanobot.trading.retcodes import ProviderDiagnostic
 
 
 class AccountState(BaseModel):
@@ -55,6 +64,12 @@ class BrokerItem(BaseModel):
     expiration_time: str | None = Field(default=None,alias="expirationTime")
 
 
+class TradeSession(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    from_time: str = Field(alias="from")
+    to_time: str = Field(alias="to")
+
+
 class SymbolSpec(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True, allow_inf_nan=False)
     symbol: str
@@ -63,11 +78,19 @@ class SymbolSpec(BaseModel):
     max_volume: Decimal = Field(alias="maxVolume", gt=0)
     volume_step: Decimal = Field(alias="volumeStep", gt=0)
     trade_mode: str = Field(alias="tradeMode")
-    currency_base: str | None = Field(default=None, alias="currencyBase")
-    currency_profit: str | None = Field(default=None, alias="currencyProfit")
+    currency_base: str | None = Field(default=None, validation_alias=AliasChoices("baseCurrency", "currencyBase", "currency_base"))
+    currency_profit: str | None = Field(default=None, validation_alias=AliasChoices("profitCurrency", "currencyProfit", "currency_profit"))
     contract_size: Decimal | None = Field(default=None, alias="contractSize")
     tick_size: Decimal | None = Field(default=None, alias="tickSize", gt=0)
-    order_mode: list[str] | None = Field(default=None,alias="orderMode")
+    order_mode: list[str] | None = Field(default=None,validation_alias=AliasChoices("allowedOrderTypes", "orderMode", "order_mode"))
+
+    allowed_expiration_modes: list[str] = Field(default_factory=list, alias="allowedExpirationModes")
+    filling_modes: list[str] = Field(default_factory=list, alias="fillingModes")
+    execution_mode: str | None = Field(default=None, alias="executionMode")
+    stops_level: int = Field(default=0, alias="stopsLevel", ge=0)
+    freeze_level: int = Field(default=0, alias="freezeLevel", ge=0)
+    point: Decimal | None = Field(default=None, gt=0)
+    trade_sessions: dict[str, list[TradeSession] | None] | None = Field(default=None, alias="tradeSessions")
 
 
 class BrokerPrice(BaseModel):
@@ -76,6 +99,7 @@ class BrokerPrice(BaseModel):
     bid: Decimal
     ask: Decimal
     time: str
+    broker_time: str | None = Field(default=None, alias="brokerTime")
     loss_tick_value: Decimal | None = Field(default=None, alias="lossTickValue", gt=0)
 
 
@@ -110,12 +134,17 @@ class AccountConnection(BaseModel):
 class TradeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
     string_code: str = Field(alias="stringCode")
+    numeric_code: int | None = Field(default=None, alias="numericCode")
     order_id: str | None = Field(default=None, alias="orderId")
     position_id: str | None = Field(default=None, alias="positionId")
 
 
 class ProviderRejectedError(RuntimeError):
     """An authenticated provider explicitly rejected an operation."""
+
+    def __init__(self, message: str, provider_error: ProviderDiagnostic | None = None):
+        super().__init__(message)
+        self.provider_error = provider_error
 
 
 class MetaApiClient:
@@ -182,8 +211,8 @@ class MetaApiClient:
             raise ValueError("Unsupported MetaApi SDK operation")
         try:
             return await account_bridge(self.connection, self.secrets).request(operation, parameters)
-        except SDKRejectedError:
-            raise ProviderRejectedError("MetaApi rejected the requested account operation") from None
+        except SDKRejectedError as exc:
+            raise ProviderRejectedError("MetaApi rejected the requested account operation", exc.provider_error) from None
 
     @property
     def account_path(self) -> str:
@@ -276,8 +305,8 @@ class MetaApiClient:
                 # Recheck inside the connector lock, immediately before stdin
                 # delivery, including time spent waiting behind other reads.
                 return parse_provider(TradeResponse, await bridge.request("trade", payload, before_write=fence))
-            except SDKRejectedError:
-                raise ProviderRejectedError("MetaApi rejected the exact authorized trade") from None
+            except SDKRejectedError as exc:
+                raise ProviderRejectedError("MetaApi rejected the exact authorized trade", exc.provider_error) from None
         # Numeric JSON is encoded from validated decimal strings without float conversion.
         numeric = {"volume", "openPrice", "stopLoss", "takeProfit"}
         fields: list[str] = []

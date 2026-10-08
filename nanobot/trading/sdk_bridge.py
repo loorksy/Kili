@@ -22,6 +22,7 @@ from nanobot.market.provider import ProviderUnavailableError
 from nanobot.security.actions import current_authorized_action
 from nanobot.security.runtime_storage import internal_state_root
 from nanobot.security.secrets import SecretStore, SecretValue
+from nanobot.trading.retcodes import ProviderDiagnostic
 
 SDK_VERSION = "29.1.1"
 
@@ -31,6 +32,7 @@ class SDKReply(BaseModel):
     ok: bool
     data: JsonValue = None
     error: str | None = None
+    provider_error: ProviderDiagnostic | None = None
 
 
 class SDKFrame(SDKReply):
@@ -40,6 +42,16 @@ class SDKFrame(SDKReply):
 
 class SDKRejectedError(RuntimeError):
     """An authenticated SDK operation received an explicit provider rejection."""
+
+    def __init__(self, message: str, provider_error: ProviderDiagnostic | None = None):
+        super().__init__(message)
+        self.provider_error = provider_error
+
+
+class SDKUnavailableError(ProviderUnavailableError):
+    def __init__(self, message: str, provider_error: ProviderDiagnostic | None = None):
+        super().__init__(message)
+        self.provider_error = provider_error
 
 
 class SDKBridge:
@@ -85,7 +97,7 @@ class SDKBridge:
                         if updates:
                             self._offer(queue, updates)
                 elif self._pending is not None and not self._pending.done():
-                    self._pending.set_result(SDKReply(ok=frame.ok, data=frame.data, error=frame.error))
+                    self._pending.set_result(SDKReply(ok=frame.ok, data=frame.data, error=frame.error, provider_error=frame.provider_error))
         except (ValueError, OSError):
             pass
         finally:
@@ -141,9 +153,11 @@ class SDKBridge:
                 await process.stdin.drain()
                 reply = await asyncio.wait_for(self._pending, timeout=75)
                 if not reply.ok:
+                    diagnostic = (ProviderDiagnostic.model_validate(self._redact(reply.provider_error.model_dump(mode="json")))
+                                  if reply.provider_error else None)
                     if reply.error == "rejected":
-                        raise SDKRejectedError("MetaApi rejected the requested operation")
-                    raise ProviderUnavailableError("MetaApi SDK account operation unavailable; verify deployment and synchronization")
+                        raise SDKRejectedError("MetaApi rejected the requested operation", diagnostic)
+                    raise SDKUnavailableError("MetaApi SDK account operation unavailable; verify deployment and synchronization", diagnostic)
                 return TypeAdapter[JsonValue](JsonValue).validate_python(self._redact(reply.data))
             except (OSError, ValueError, asyncio.TimeoutError, asyncio.CancelledError, ProviderUnavailableError) as exc:
                 # Cancellation after sending is uncertain too. Never replay a

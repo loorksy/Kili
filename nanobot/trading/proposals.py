@@ -13,6 +13,7 @@ from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore, RuntimeRecord
 from nanobot.trading.instruments import InstrumentMappings
 from nanobot.trading.metaapi import AccountState, BrokerPrice, MetaApiClient, SymbolSpec
+from nanobot.trading.preflight import validate_market
 
 
 class TradeIntent(BaseModel):
@@ -141,19 +142,21 @@ class TradeProposals:
     @staticmethod
     def validate_spec(intent: TradeIntent, spec: SymbolSpec) -> None:
         if spec.trade_mode == "SYMBOL_TRADE_MODE_DISABLED":
-            raise ValueError("Broker trading is disabled for this symbol")
+            raise ValueError("Broker trading is disabled for this symbol / التداول معطّل لهذا الرمز")
         if intent.operation == "open":
             if spec.trade_mode == "SYMBOL_TRADE_MODE_CLOSEONLY":
-                raise ValueError("Broker symbol is close-only")
+                raise ValueError("Broker symbol is close-only / الرمز يسمح بالإغلاق فقط")
             if ((spec.trade_mode == "SYMBOL_TRADE_MODE_LONGONLY" and intent.side == "sell")
                     or (spec.trade_mode == "SYMBOL_TRADE_MODE_SHORTONLY" and intent.side == "buy")):
-                raise ValueError("Broker does not permit this direction")
+                raise ValueError("Broker does not permit this direction / الوسيط لا يسمح بهذا الاتجاه")
         if intent.volume is not None:
             if not spec.min_volume <= intent.volume <= spec.max_volume or intent.volume % spec.volume_step:
-                raise ValueError("Volume violates broker minimum/maximum/step")
+                raise ValueError("Volume violates broker minimum/maximum/step / حجم اللوت يخالف حدود الوسيط أو خطوة الحجم")
         for price in (intent.price, intent.stop_loss, intent.take_profit):
             if price is not None and price != price.quantize(Decimal(1).scaleb(-spec.digits)):
-                raise ValueError("Price precision violates broker specification")
+                raise ValueError("Price precision violates broker specification / دقة السعر تخالف مواصفات الوسيط")
+            if price is not None and spec.tick_size is not None and price % spec.tick_size:
+                raise ValueError("Price violates broker tick size / السعر يخالف خطوة التسعير")
 
     async def validate_current(self, intent: TradeIntent, symbol: str, *, mandate_id: str | None = None) -> tuple[AccountState, SymbolSpec, BrokerPrice]:
         connection = await self.client.connection_state()
@@ -176,6 +179,7 @@ class TradeProposals:
         observed = datetime.fromisoformat(price.time.replace("Z", "+00:00"))
         if observed.tzinfo is None or not -30 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 300:
             raise ValueError("Broker price is stale or has no trusted timestamp")
+        target = None
         if intent.operation != "open":
             kind = "orders" if intent.operation in {"modify_order", "cancel_order"} else "positions"
             targets = await self.client.items(kind)
@@ -190,6 +194,7 @@ class TradeProposals:
             target = next((p for p in targets if p.id == intent.target_id), None)
             if target is None or target.symbol != symbol:
                 raise ValueError("Exact broker target does not match this instrument")
+        validate_market(intent, spec, price, datetime.now(timezone.utc), target)
         return account, spec, price
 
     @staticmethod
@@ -201,8 +206,9 @@ class TradeProposals:
         }[intent.operation]
         if intent.operation == "close_position" and intent.volume is not None:
             action_type = "POSITION_PARTIAL"
+        digest = hashlib.sha256(effect_key.encode()).hexdigest()
         payload: dict[str, JsonValue] = {"actionType": action_type, "symbol": symbol,
-                                       "clientId": "nb" + hashlib.sha256(effect_key.encode()).hexdigest()[:20]}
+                                       "clientId": f"nb_{digest[:10]}_{digest[10:20]}"}
         if intent.target_id:
             payload["orderId" if intent.operation in {"modify_order", "cancel_order"} else "positionId"] = intent.target_id
         for key, value in (("volume", intent.volume), ("openPrice", intent.price),

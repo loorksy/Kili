@@ -21,6 +21,8 @@ from nanobot.session.records import RecordStore, RuntimeRecord
 from nanobot.trading.delegation import MandateAuthority
 from nanobot.trading.metaapi import ProviderRejectedError
 from nanobot.trading.proposals import TradePreview, TradeProposals
+from nanobot.trading.retcodes import ProviderDiagnostic, diagnostic_result, trade_outcome
+from nanobot.trading.sdk_bridge import SDKUnavailableError
 
 
 class TradeJournalEntry(RuntimeRecord):
@@ -145,12 +147,22 @@ class TradeExecutor:
                 response = await self.proposals.client.mutate(preview.broker_request, effect=effect, journal=self.effects)
             reference = response.order_id or response.position_id
             result = response.model_dump(mode="json")
-            if response.string_code in {"TRADE_RETCODE_DONE","TRADE_RETCODE_PLACED","TRADE_RETCODE_DONE_PARTIAL"}:
-                state = "SUCCEEDED"
-            elif response.string_code in {"TRADE_RETCODE_REJECT","TRADE_RETCODE_INVALID_VOLUME","TRADE_RETCODE_NO_MONEY","TRADE_RETCODE_MARKET_CLOSED"}:
-                state = "FAILED"
-        except ProviderRejectedError:
-            state, result = "FAILED", {"message":"Provider rejected the action"}
+            state = trade_outcome(response.string_code, response.numeric_code)
+            if state != "SUCCEEDED":
+                result.update(diagnostic_result(ProviderDiagnostic(kind="TradeResponse",
+                    string_code=response.string_code, numeric_code=response.numeric_code)))
+        except (ProviderRejectedError, SDKUnavailableError) as exc:
+            diagnostic = exc.provider_error
+            state = (trade_outcome(diagnostic.string_code, diagnostic.numeric_code, kind=diagnostic.kind)
+                     if diagnostic else ("FAILED" if isinstance(exc, ProviderRejectedError) else "UNCERTAIN"))
+            # Unavailable transport/synchronization never proves non-execution.
+            if isinstance(exc, SDKUnavailableError):
+                state = "UNCERTAIN"
+            result = {"message": "Provider rejected the action" if state == "FAILED" else "Outcome uncertain; reconcile before any retry"}
+            if diagnostic:
+                result.update(diagnostic_result(diagnostic))
+                logger.warning("Trade response effect={} kind={} code={}/{} state={}",
+                               effect.id, diagnostic.kind, diagnostic.string_code, diagnostic.numeric_code, state)
         except ProviderUnavailableError:
             result = {"message":"Outcome uncertain; reconcile before any retry"}
         except BaseException:

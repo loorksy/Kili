@@ -58,7 +58,7 @@ def broker_fixture(tmp_path):
             return httpx.Response(200,json=["GOLDm"])
         if path.endswith("specification"):
             return httpx.Response(200,json={"symbol":"GOLDm","digits":2,"minVolume":".01","maxVolume":"100","volumeStep":".01",
-                "tradeMode":"SYMBOL_TRADE_MODE_FULL","contractSize":"100","currencyProfit":"USD","orderMode":["SYMBOL_ORDER_MARKET","SYMBOL_ORDER_LIMIT","SYMBOL_ORDER_STOP"]})
+                "tradeMode":"SYMBOL_TRADE_MODE_FULL","contractSize":"100","currencyProfit":"USD","orderMode":["SYMBOL_ORDER_MARKET","SYMBOL_ORDER_LIMIT","SYMBOL_ORDER_STOP","SYMBOL_ORDER_SL","SYMBOL_ORDER_TP"]})
         if path.endswith("current-price"):
             return httpx.Response(200,json={"symbol":"GOLDm","bid":state["bid"],"ask":state["ask"],"time":datetime.now(timezone.utc).isoformat()})
         return httpx.Response(200,json={"_id":"demo","state":"DEPLOYED","connectionStatus":"CONNECTED" if state["connected"] else "DISCONNECTED","region":"london"})

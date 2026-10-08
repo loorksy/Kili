@@ -18,7 +18,7 @@ def client(tmp_path):
         if path.endswith("account-information"):
             return httpx.Response(200,json={"broker":"demo","currency":"USD","balance":"10000.01","equity":"9999.02","tradeAllowed":True})
         if path.endswith("positions") or path.endswith("orders"):
-            return httpx.Response(200,json=[{"id":"1","symbol":"GOLDm","type":"POSITION_TYPE_BUY","volume":"0.1"}])
+            return httpx.Response(200,json=[{"id":"1","symbol":"GOLDm","type":"ORDER_TYPE_BUY_LIMIT" if path.endswith("orders") else "POSITION_TYPE_BUY","volume":"0.1"}])
         if path.endswith("symbols"):
             return httpx.Response(200,json=["GOLDm","EURUSD.a"])
         if path.endswith("specification"):

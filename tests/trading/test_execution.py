@@ -153,7 +153,12 @@ async def test_timeout_never_retries_and_reconciliation_is_conservative(tmp_path
         assert json.loads(await registry.execute("trade_execute",{"preview_id":preview.id}))["state"] == "UNCERTAIN"
         effect_id=result["effect_id"]
         assert json.loads(await registry.execute("trade_reconcile",{"effect_id":effect_id}))["state"] == "UNCERTAIN"
-        matches.append({"id":"order-1","symbol":"GOLDm","type":"POSITION_TYPE_BUY","volume":"0.1","clientId":preview.broker_request["clientId"]})
+        # A matching strategy/position prefix is insufficient: MetaApi can
+        # rewrite the closing-order segment for stops/targets.
+        client_id = preview.broker_request["clientId"]
+        matches.append({"id":"order-1","symbol":"GOLDm","type":"POSITION_TYPE_BUY","volume":"0.1", "clientId":client_id.rsplit("_", 1)[0] + "_other"})
+        assert json.loads(await registry.execute("trade_reconcile",{"effect_id":effect_id}))["state"] == "UNCERTAIN"
+        matches[0]["clientId"] = client_id
         assert json.loads(await registry.execute("trade_reconcile",{"effect_id":effect_id}))["state"] == "SUCCEEDED"
     assert len(calls) == 1
 

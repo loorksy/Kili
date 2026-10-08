@@ -275,6 +275,7 @@ class AccountEnvironment:
 
 
 async def run() -> None:
+    from nanobot.trading.retcodes import provider_diagnostic
     wire = sys.stdout
     sys.stdout = open(os.devnull, "w")
     logging.disable(logging.CRITICAL)
@@ -293,10 +294,10 @@ async def run() -> None:
                 data = await asyncio.wait_for(environment.execute(request["operation"], request["parameters"]), timeout=55)
                 reply = {"ok": True, "data": data}
             except Exception as exc:
-                # Provider diagnostics may contain tokens and URLs. Only a
-                # classified code crosses IPC; never raw exception strings.
+                # Sanitized bounded diagnostics only; never SDK tracebacks/payloads.
                 rejected = type(exc).__name__ in {"TradeException", "ValidationException", "UnauthorizedException", "ForbiddenException", "NotFoundException"}
-                reply = {"ok": False, "error": "rejected" if rejected else "unavailable"}
+                reply = {"ok": False, "error": "rejected" if rejected else "unavailable",
+                         "provider_error": provider_diagnostic(exc, bootstrap["token"]).model_dump(mode="json")}
             emit(reply)
     finally:
         await environment.close()
