@@ -23,4 +23,3 @@ def workstation(tmp_path):
                    source="oanda", fetched_at=start) for i in range(100)]
     cache.put("XAU_USD", "gold", "H1", data)
     return service, ChartController(service, cache), actor, chart, data
-
