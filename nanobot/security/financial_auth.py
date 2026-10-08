@@ -6,7 +6,7 @@ from nanobot.config.schema import Config
 
 
 def require_financial_gateway_auth(config: Config) -> None:
-    if config.tools.integrations.metaapi is None:
+    if not config.tools.integrations.broker_accounts():
         return
     raw = (config.channels.model_extra or {}).get("websocket", {})
     websocket = WebSocketConfig.model_validate(raw)

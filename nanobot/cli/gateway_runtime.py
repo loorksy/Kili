@@ -905,23 +905,23 @@ def _run_gateway(
         lambda: now_ms() if action_journal.pending_resolutions() else None,
         _queue_resolved_actions)
 
-    if config.tools.integrations.metaapi:
+    for account_id, connection in config.tools.integrations.broker_accounts().items():
         from nanobot.trading.execution import TradeExecutor
         from nanobot.trading.metaapi import MetaApiClient
         from nanobot.trading.mission_watchers import MissionWatchers
         from nanobot.trading.proposals import TradeProposals
         from nanobot.trading.recovery import TradeRecovery
         trade_executor = TradeExecutor(
-            TradeProposals(MetaApiClient(config.tools.integrations.metaapi)),
+            TradeProposals(MetaApiClient(connection)),
             live_enabled=config.tools.integrations.autonomous_trading_enabled,
         )
         trade_recovery = TradeRecovery(
             trade_executor,
             session_manager.responsibilities,
         )
-        cron.register_deadline_source("external_effects", trade_recovery.nearest, trade_recovery.run_due)
+        cron.register_deadline_source("external_effects:" + account_id, trade_recovery.nearest, trade_recovery.run_due)
         mission_watchers = MissionWatchers(trade_executor, session_manager.responsibilities, agent.tools.policy)
-        cron.register_deadline_source("trading_missions", mission_watchers.nearest, mission_watchers.run_due)
+        cron.register_deadline_source("trading_missions:" + account_id, mission_watchers.nearest, mission_watchers.run_due)
 
 
     cron.register_system_job(CronJob(

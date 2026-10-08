@@ -1381,6 +1381,7 @@ export interface IntegrationStatus {
   autonomous_trading_enabled?: boolean;
   oanda: { configured: boolean; account_id?: string; environment?: string };
   metaapi: { configured: boolean; account_id?: string; region?: string };
+  accounts?: { account_id: string; name: string; environment: string; region: string; default: boolean }[];
   restart_required?: boolean;
 }
 export function fetchIntegrationSettings(token: string) {

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
+from nanobot.trading.accounts import TradingAccounts
 from nanobot.trading.metaapi import MetaApiClient
 from nanobot.trading.mission_models import MandateEnvelope, TradingGoal, TradingPlan
 from nanobot.trading.missions import TradingMissions
@@ -48,11 +49,13 @@ class MissionRequest(BaseModel):
     goal_id: str | None = None
     plan_id: str | None = None
     mandate_id: str | None = None
+    account_id: str | None = None
 
 
 class TradingMissionTool(Tool):
     def __init__(self, ctx: ToolContext):
         self.ctx = ctx
+        self.accounts = TradingAccounts(ctx.config.integrations)
         connection = ctx.config.integrations.metaapi
         if connection is None:
             raise ValueError("Configure an account reference before creating a trading mission")
@@ -79,7 +82,7 @@ class TradingMissionTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.integrations.metaapi is not None
+        return bool(ctx.config.integrations.broker_accounts())
 
     @classmethod
     def create(cls, ctx: ToolContext) -> TradingMissionTool:
@@ -91,6 +94,25 @@ class TradingMissionTool(Tool):
         if context is None or context.session_key is None:
             raise PermissionError("Trading missions require a conversation")
         principal = context.session_key
+        account_id = request.account_id
+        if request.mandate_id:
+            bound = self.service.mandates.get(request.mandate_id)
+            self.service.owner(principal, bound)
+            bound_account = bound.envelope.account_id
+        elif request.goal_id or request.plan_id:
+            goal_id = request.goal_id or self.service.plans.get(request.plan_id or "").goal_id
+            goal = self.service.goals.get(goal_id)
+            self.service.owner(principal, goal)
+            bound_account = goal.account_id
+        else:
+            bound_account = None
+        if bound_account is not None:
+            if account_id is not None and account_id != bound_account:
+                raise PermissionError("An existing trading mission cannot switch broker accounts")
+            account_id = bound_account
+        connection = self.accounts.connection(account_id, principal=principal)
+        service = self.service if connection.account_id == self.service.client.connection.account_id else TradingMissions(
+            MetaApiClient(connection), self.service.journal, live_enabled=self.service.live_enabled)
         if request.operation == "create_goal":
             if request.goal is None or self.ctx.sessions is None:
                 raise ValueError("Resolved goal and durable session infrastructure are required")
@@ -101,35 +123,35 @@ class TradingMissionTool(Tool):
             if responsibility.session_key != principal:
                 raise PermissionError("Responsibility belongs to another conversation; relink first")
             goal = TradingGoal.model_validate({**request.goal.model_dump(),"id":"trading_goal_"+uuid.uuid4().hex,
-                "principal":principal,"responsibility_id":identity,"account_id":self.service.client.connection.account_id})
-            return self.service.create_goal(goal).model_dump_json()
+                "principal":principal,"responsibility_id":identity,"account_id":service.client.connection.account_id})
+            return service.create_goal(goal).model_dump_json()
         if request.operation == "create_plan":
             if request.goal_id is None or request.plan is None:
                 raise ValueError("Goal id and final structured plan are required")
-            version = max((p.plan_version for p in self.service.plans.list() if p.goal_id == request.goal_id),default=0)+1
+            version = max((p.plan_version for p in service.plans.list() if p.goal_id == request.goal_id),default=0)+1
             plan = TradingPlan.model_validate({**request.plan.model_dump(),"id":"trading_plan_"+uuid.uuid4().hex,
                 "goal_id":request.goal_id,"plan_version":version})
-            return self.service.create_plan(principal,plan).model_dump_json()
+            return service.create_plan(principal,plan).model_dump_json()
         if request.operation == "propose":
             if request.goal_id is None or request.plan_id is None or request.envelope is None:
                 raise ValueError("Goal, inspected plan and explicit bounded envelope are required")
-            mandate,approval = await self.service.propose(principal,request.goal_id,request.plan_id,request.envelope)
+            mandate,approval = await service.propose(principal,request.goal_id,request.plan_id,request.envelope)
             return ("Profit target is not guaranteed; allocated capital is not physically segregated.\n"
                 "```trading_mission\n"+json.dumps({"mandate_id":mandate.id,"session_key":principal})+"\n```\n"
                 "```action_approval\n"+json.dumps({"approval_id":approval.id,"session_key":principal})+"\n```")
         if request.operation == "list":
-            return json.dumps([m.model_dump(mode="json") for m in self.service.mandates.list() if m.principal == principal])
+            return json.dumps([m.model_dump(mode="json") for m in service.mandates.list() if m.principal == principal])
         if request.mandate_id is None:
             raise ValueError("Mandate id is required")
-        mandate = self.service.mandates.get(request.mandate_id)
-        self.service.owner(principal,mandate)
+        mandate = service.mandates.get(request.mandate_id)
+        service.owner(principal,mandate)
         if request.operation == "activate":
-            mandate = await self.service.activate(principal,mandate.id)
+            mandate = await service.activate(principal,mandate.id)
         elif request.operation == "reduce":
             if request.envelope is None:
                 raise ValueError("Exact reduced envelope required")
-            mandate = self.service.reduce(principal,mandate.id,request.envelope)
+            mandate = service.reduce(principal,mandate.id,request.envelope)
         elif request.operation in {"pause","cancel","resume","emergency_stop"}:
-            mandate = self.service.control(principal,mandate.id,request.operation,
+            mandate = service.control(principal,mandate.id,request.operation,
                 user=context.attributes.get("mission_user_interaction") is True)
         return mandate.model_dump_json()

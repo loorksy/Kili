@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
-from nanobot.trading.delegation import MandateAuthority
+from nanobot.security.actions import Action, ActionAuthority, DelegatedAuthorization
+from nanobot.trading.accounts import TradingAccounts
 from nanobot.trading.execution import TradeExecutor
-from nanobot.trading.metaapi import MetaApiClient
 from nanobot.trading.proposals import TradeProposals
 
 
@@ -35,8 +35,26 @@ class TradeExecuteTool(Tool):
     action_class = "consequential"
     manages_effects = True
 
-    def __init__(self, executor: TradeExecutor):
+    def __init__(self, executor: TradeExecutor, accounts: TradingAccounts | None = None):
         self.executor = executor
+        self.accounts = accounts
+
+    def executor_for(self, preview_id: str, owner: str) -> TradeExecutor:
+        preview = self.executor.proposals.previews.get(preview_id)
+        self.executor.proposals.require_owner(owner, preview.principal)
+        if self.accounts is None:
+            return self.executor
+        proposals = TradeProposals(self.accounts.client(preview.account_id),
+            mappings=self.executor.proposals.mappings, proposals=self.executor.proposals.proposals,
+            previews=self.executor.proposals.previews)
+        return TradeExecutor(proposals, self.executor.effects, self.executor.journal,
+                             live_enabled=self.executor.authority.missions.live_enabled)
+
+    async def evaluate(self, action: Action) -> DelegatedAuthorization | None:
+        identity = action.parameters.get("preview_id")
+        if not isinstance(identity, str):
+            raise ValueError("Exact preview ID is required")
+        return await self.executor_for(identity, action.principal).authority.evaluate(action)
 
     @property
     def name(self) -> str:
@@ -52,29 +70,32 @@ class TradeExecuteTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.integrations.metaapi is not None
+        return bool(ctx.config.integrations.broker_accounts())
 
     @classmethod
     def create(cls, ctx: ToolContext) -> TradeExecuteTool:
-        connection = ctx.config.integrations.metaapi
-        assert connection is not None
-        return cls(TradeExecutor(TradeProposals(MetaApiClient(connection)),live_enabled=ctx.config.integrations.autonomous_trading_enabled))
+        accounts = TradingAccounts(ctx.config.integrations)
+        return cls(TradeExecutor(TradeProposals(accounts.client()),
+            live_enabled=ctx.config.integrations.autonomous_trading_enabled), accounts)
 
     def action_parameters(self, params: dict[str, Any]) -> dict[str, Any]:
         request = ExecuteRequest.model_validate(params)
-        return self.executor.proposals.require_preview(request.preview_id,principal()).material_action()
+        owner = principal()
+        return self.executor_for(request.preview_id, owner).proposals.require_preview(request.preview_id, owner).material_action()
 
-    def action_authority(self) -> MandateAuthority:
-        return self.executor.authority
+    def action_authority(self) -> ActionAuthority:
+        return self if self.accounts else self.executor.authority
 
     async def execute(self, **kwargs: Any) -> str:
         request = ExecuteRequest.model_validate(kwargs)
-        return json.dumps(await self.executor.execute(request.preview_id,principal()))
+        owner = principal()
+        return json.dumps(await self.executor_for(request.preview_id, owner).execute(request.preview_id, owner))
 
 
 class TradeReconcileTool(Tool):
-    def __init__(self, executor: TradeExecutor):
+    def __init__(self, executor: TradeExecutor, accounts: TradingAccounts | None = None):
         self.executor = executor
+        self.accounts = accounts
 
     @property
     def name(self) -> str:
@@ -90,12 +111,26 @@ class TradeReconcileTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.integrations.metaapi is not None
+        return bool(ctx.config.integrations.broker_accounts())
 
     @classmethod
     def create(cls, ctx: ToolContext) -> TradeReconcileTool:
-        return cls(TradeExecuteTool.create(ctx).executor)
+        tool = TradeExecuteTool.create(ctx)
+        return cls(tool.executor, tool.accounts)
 
     async def execute(self, **kwargs: Any) -> str:
         request = ReconcileRequest.model_validate(kwargs)
-        return json.dumps(await self.executor.reconcile(request.effect_id,principal()))
+        owner = principal()
+        executor = self.executor
+        if self.accounts:
+            effect = executor.effects.get_effect(request.effect_id)
+            if effect.action.principal != owner:
+                raise PermissionError("Effect belongs to another conversation")
+            account_id = effect.action.parameters.get("account_id")
+            if not isinstance(account_id, str):
+                raise ValueError("Effect has no broker account binding")
+            proposals = TradeProposals(self.accounts.client(account_id), mappings=executor.proposals.mappings,
+                proposals=executor.proposals.proposals, previews=executor.proposals.previews)
+            executor = TradeExecutor(proposals, executor.effects, executor.journal,
+                                     live_enabled=executor.authority.missions.live_enabled)
+        return json.dumps(await executor.reconcile(request.effect_id, owner))

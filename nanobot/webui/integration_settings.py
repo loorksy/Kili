@@ -22,12 +22,15 @@ class ConnectionUpdate(BaseModel):
     environment: Literal["practice", "live"] = "practice"
     region: str = "london"
     charts_enabled: bool = True
+    name: str = ""
+    make_default: bool = True
 
 
 class MappingUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     instrument: Instrument
     broker_symbol: str
+    account_id: str | None = None
 
 
 class AutonomyUpdate(BaseModel):
@@ -47,31 +50,37 @@ def integration_status(config: Config) -> dict[str, object]:
         else:
             result[provider] = {"configured": False}
     result["mappings"] = [m.model_dump(mode="json") for m in InstrumentMappings().records.list()]
+    result["accounts"] = [{"account_id": account.account_id, "name": account.name or account.account_id,
+                           "environment": account.environment, "region": account.region,
+                           "default": account.account_id == config.tools.integrations.default_metaapi_account,
+                           "credential": "stored"}
+                          for account in config.tools.integrations.broker_accounts().values()]
     return result
 
 
 def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdate) -> dict[str, object]:
     def change(config: Config) -> None:
         previous = getattr(config.tools.integrations, request.provider)
-        if request.provider == "metaapi" and isinstance(previous,Connection) and previous.account_id != request.account_id:
-            from nanobot.session.records import RecordStore
-            from nanobot.trading.mission_models import AccountGuardrails
-            guards = RecordStore("account_guardrails",AccountGuardrails)
-            try:
-                old_guard = guards.get(previous.account_id)
-            except ValueError:
-                pass
-            else:
-                old_guard.enabled = False
-                guards.save(old_guard)
+        if request.provider == "metaapi":
+            # Adding/selecting a profile must never overwrite another token or
+            # disable that account's already approved background mandates.
+            previous = config.tools.integrations.broker_accounts().get(request.account_id)
         reference = previous.secret_ref if isinstance(previous, Connection) else "connection_" + uuid.uuid4().hex
         connection = Connection(secret_ref=reference, account_id=request.account_id,
-                                environment=request.environment, region=request.region)
+                                environment=request.environment, region=request.region, name=request.name)
         if request.token:
             SecretStore().put(reference, request.token.get_secret_value())
         elif not isinstance(previous, Connection):
             raise ValueError("A credential is required for a new connection")
-        setattr(config.tools.integrations, request.provider, connection)
+        if request.provider == "metaapi":
+            accounts = config.tools.integrations.broker_accounts()
+            accounts[request.account_id] = connection
+            config.tools.integrations.metaapi_accounts = accounts
+            if request.make_default or config.tools.integrations.metaapi is None:
+                config.tools.integrations.metaapi = connection
+                config.tools.integrations.default_metaapi_account = request.account_id
+        else:
+            config.tools.integrations.oanda = connection
         config.tools.integrations.charts_enabled = request.charts_enabled
         from nanobot.security.financial_auth import require_financial_gateway_auth
         require_financial_gateway_auth(config)
@@ -80,9 +89,8 @@ def configure_connection(settings: WebUISettingsConfig, request: ConnectionUpdat
 
 
 async def configure_mapping(config: Config, request: MappingUpdate) -> dict[str, object]:
-    connection = config.tools.integrations.metaapi
-    if connection is None:
-        raise ValueError("MetaApi connection is not configured")
+    from nanobot.trading.accounts import TradingAccounts
+    connection = TradingAccounts(config.tools.integrations).connection(request.account_id)
     record = await InstrumentMappings().verify_user_mapping(MetaApiClient(connection), request.instrument, request.broker_symbol)
     return record.model_dump(mode="json")
 

@@ -990,7 +990,10 @@ class GatewayHTTPHandler:
                     mission_snapshot,
                     service_for,
                 )
-                service = service_for(self.settings.config.load())
+                mandate_id = payload.get("mandate_id") if payload else (query.get("mandate_id") or [""])[0]
+                if not isinstance(mandate_id, str):
+                    return _http_error(400, "Mandate ID is required")
+                service = service_for(self.settings.config.load(), mandate_id, principal)
                 if path.endswith("/control"):
                     if payload is None:
                         return _http_error(405, "Mission changes require authenticated WebSocket")

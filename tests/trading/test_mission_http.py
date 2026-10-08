@@ -21,7 +21,7 @@ async def test_http_snapshot_is_authenticated_and_plain_http_cannot_mutate(tmp_p
     handler = object.__new__(GatewayHTTPHandler)
     handler.tokens,handler.session_manager = TokenGate(),manager
     handler.settings = SimpleNamespace(config=SimpleNamespace(load=lambda: None))
-    monkeypatch.setattr("nanobot.webui.mission_resources.service_for",lambda config: service)
+    monkeypatch.setattr("nanobot.webui.mission_resources.service_for",lambda config, mandate_id, principal: service)
     path = "/api/webui/trading-missions"
     query = "?session_key="+mandate.principal+"&mandate_id="+mandate.id
     assert (await handler._handle_cloud_resource(Request(path+query,Headers()),path)).status_code == 401

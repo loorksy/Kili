@@ -30,6 +30,7 @@ class MissionWatchers:
         held = {r.mandate_id for r in self.service.reservations.list() if r.state != "RELEASED"}
         return min((min(m.next_check_at,m.envelope.expires_at) if m.status == "ACTIVE" else m.next_check_at
             for m in self.service.mandates.list() if m.approved_at is not None
+            and m.envelope.account_id == self.service.client.connection.account_id
             and self.observable(m,held)),default=None)
 
     @staticmethod
@@ -128,6 +129,8 @@ class MissionWatchers:
     async def run_due(self) -> None:
         held = {r.mandate_id for r in self.service.reservations.list() if r.state != "RELEASED"}
         for mandate in self.service.mandates.list():
+            if mandate.envelope.account_id != self.service.client.connection.account_id:
+                continue
             due = min(mandate.next_check_at,mandate.envelope.expires_at) if mandate.status == "ACTIVE" else mandate.next_check_at
             if mandate.approved_at is None or not self.observable(mandate,held) or due > now_ms():
                 continue

@@ -6,8 +6,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from nanobot.config.schema import Config
+from nanobot.session.records import RecordStore
+from nanobot.trading.accounts import TradingAccounts
 from nanobot.trading.metaapi import MetaApiClient
-from nanobot.trading.mission_models import AccountGuardrails
+from nanobot.trading.mission_models import AccountGuardrails, TradingMandate
 from nanobot.trading.missions import TradingMissions
 
 
@@ -19,10 +21,14 @@ class MissionControl(BaseModel):
     guardrails: AccountGuardrails | None = None
 
 
-def service_for(config: Config) -> TradingMissions:
-    connection = config.tools.integrations.metaapi
-    if connection is None:
-        raise ValueError("MetaApi connection is unavailable")
+def service_for(config: Config, mandate_id: str | None = None, principal: str | None = None) -> TradingMissions:
+    account_id = None
+    if mandate_id:
+        mandate = RecordStore("trading_mandates", TradingMandate).get(mandate_id)
+        if mandate.principal != principal:
+            raise PermissionError("Trading mission belongs to another conversation")
+        account_id = mandate.envelope.account_id
+    connection = TradingAccounts(config.tools.integrations).connection(account_id, principal=principal)
     return TradingMissions(MetaApiClient(connection),live_enabled=config.tools.integrations.autonomous_trading_enabled)
 
 

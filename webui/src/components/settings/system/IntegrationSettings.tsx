@@ -10,6 +10,8 @@ export function IntegrationSettings() {
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [provider, setProvider] = useState<"oanda" | "metaapi">("oanda");
   const [account, setAccount] = useState("");
+  const [name, setName] = useState("");
+  const [makeDefault, setMakeDefault] = useState(true);
   const [credential, setCredential] = useState("");
   const [region, setRegion] = useState("london");
   const [environment, setEnvironment] = useState("practice");
@@ -26,7 +28,8 @@ export function IntegrationSettings() {
     setBusy(true);
     try {
       setStatus(await configureIntegration(client, { provider, account_id: account, token: credential || null,
-        environment, region, charts_enabled: true }));
+        environment, region, charts_enabled: true,
+        ...(status?.accounts !== undefined ? { name, make_default: makeDefault } : {}) }));
       setCredential(""); setNotice("Saved. Restart the gateway to enable the connection tools and watchers.");
     } catch { setCredential(""); setNotice("Could not save connection."); }
     finally { setBusy(false); }
@@ -34,7 +37,8 @@ export function IntegrationSettings() {
   async function map() {
     setBusy(true);
     try {
-      await configureInstrumentMapping(client, { instrument: { id: canonical, display_symbol: canonical, asset_class: "custom" }, broker_symbol: symbol });
+      await configureInstrumentMapping(client, { instrument: { id: canonical, display_symbol: canonical, asset_class: "custom" }, broker_symbol: symbol,
+        ...(status?.accounts !== undefined ? { account_id: account || null } : {}) });
       setNotice("Verified against this account's broker symbol specification.");
     } catch { setNotice("Mapping could not be verified. Check the exact broker symbol and connection."); }
     finally { setBusy(false); }
@@ -45,6 +49,23 @@ export function IntegrationSettings() {
       <SettingsRow title="Connection" description="OANDA supplies analysis data. MetaApi supplies the broker account. Credentials are stored privately.">
         <select value={provider} onChange={e => setProvider(e.target.value as "oanda" | "metaapi")}><option value="oanda">OANDA</option><option value="metaapi">MetaApi</option></select>
       </SettingsRow>
+      {provider === "metaapi" && status?.accounts !== undefined && <>
+        <SettingsRow title="Saved accounts" description="Each account keeps its own positions, approvals and background missions. You can switch the account for new requests in chat.">
+          <select aria-label="Saved broker account" value={account} onChange={e => {
+            const profile = status?.accounts?.find(item => item.account_id === e.target.value);
+            setAccount(e.target.value); setCredential(""); setName(profile?.name ?? "");
+            setRegion(profile?.region ?? "london"); setEnvironment(profile?.environment ?? "practice");
+            setMakeDefault(profile?.default ?? true);
+          }}>
+            <option value="">Add another account</option>
+            {status?.accounts?.map(item => <option key={item.account_id} value={item.account_id}>{item.name}{item.default ? " (default)" : ""}</option>)}
+          </select>
+        </SettingsRow>
+        <SettingsRow title="Account name"><Input aria-label="Broker account name" value={name} onChange={e => setName(e.target.value)} placeholder="Personal / Demo / …" /></SettingsRow>
+        <SettingsRow title="Default account" description="Used for new conversations until an account is selected. Existing trades and mandates keep their original account.">
+          <input aria-label="Default broker account" type="checkbox" checked={makeDefault} onChange={e => setMakeDefault(e.target.checked)} />
+        </SettingsRow>
+      </>}
       <SettingsRow title="Account"><Input aria-label="Connection account" value={account} onChange={e => setAccount(e.target.value)} placeholder={status?.[provider]?.account_id ?? "Account ID"} /></SettingsRow>
       <SettingsRow title="Credential" description={status?.[provider]?.configured ? "Stored credential will remain unless replaced." : undefined}>
         <Input aria-label="Connection credential" type="password" autoComplete="new-password" value={credential} onChange={e => setCredential(e.target.value)} placeholder="Token" />
