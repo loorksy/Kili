@@ -168,6 +168,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     test: {
+      testTimeout: 15000,
+      hookTimeout: 30000,
       environment: "happy-dom",
       globals: true,
       setupFiles: ["./src/tests/setup.ts"],

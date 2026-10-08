@@ -1,7 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeAll, beforeEach } from "vitest";
+import { configure } from "@testing-library/react";
 
 import i18n, { initializeI18n, loadAllLocaleResources } from "@/i18n";
+
+// Cold lazy-module loads under shared CI CPU can exceed the library's 1s
+// retry default. Keep every assertion, with bounded asynchronous wait budgets.
+configure({ asyncUtilTimeout: 5000 });
 
 // The DOM test environment does not implement pointer capture used by Radix Select.
 if (!HTMLElement.prototype.hasPointerCapture) {

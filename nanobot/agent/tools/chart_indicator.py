@@ -141,6 +141,8 @@ class ChartIndicatorTool(Tool):
             return json.dumps({"timestamps": [candle_time(c) for c in candles], "values": {key: [str(v) if v is not None else None for v in values] for key, values in result.items()}, "definition_hash": record.definition_hash, "version": record.indicator_version})
         if request.expected_revision is None:
             raise ValueError("Expected chart revision is required")
+        if chart.provider != "metaapi" or chart.account_id is None:
+            raise ValueError("This chart is archived; create a new broker chart before editing indicators")
         self.charts.require_access(chart, actor, write=True)
         if request.operation in {"update", "remove"}:
             if instance is None:

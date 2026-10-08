@@ -1165,6 +1165,9 @@ describe("ThreadComposer", () => {
   });
 
   it("does not transcribe recordings that are too short", async () => {
+    // Test recording duration, not DOM-query time under shared CI CPU load.
+    // afterEach restores this clock spy; timer behavior stays unchanged.
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     mockVoiceRecorder();
     const onTranscribeAudio = vi.fn(async () => "should not appear");
     render(

@@ -128,3 +128,11 @@ async def test_legacy_chart_is_read_only_cached_archive_not_broker_rebinding(wor
         await update_chart(config, SessionManager(tmp_path / "workspace"), MessageBus(), actor.principal,
             {"operation": "set_timeframe", "chart_id": archived.id, "expected_revision": archived.revision, "timeframe": "H4"})
     assert service.get(archived.id, actor).provider == "oanda"
+    from nanobot.agent.tools.chart_indicator import ChartIndicatorTool
+    from nanobot.agent.tools.context import RequestContext, ToolContext, request_context
+    indicator = ChartIndicatorTool(ToolContext(config=config.tools, workspace=str(tmp_path)))
+    indicator.charts = service
+    with request_context(RequestContext(channel="websocket", chat_id="main", session_key=actor.principal)):
+        with pytest.raises(ValueError, match="archived"):
+            await indicator.execute(operation="add", chart_id=archived.id,
+                indicator_id="MA", expected_revision=archived.revision)
