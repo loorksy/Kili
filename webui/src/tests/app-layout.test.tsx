@@ -296,9 +296,10 @@ import { mockBrowserFocus } from "./browser-focus";
 
 describe("App layout", () => {
   beforeAll(async () => {
-    // Task controls test capability admission, not cold Vite compilation of
-    // the lazy conversation bundle. Load it before the existing UI wait clocks.
+    // Prepare lazy page fixtures before the existing UI assertion clocks.
+    // These tests verify capability/layout behavior, not cold Vite compilation.
     await import("@/components/thread/ThreadShell");
+    await import("@/components/settings/SettingsView");
   });
   let restoreBrowserFocus: (() => void) | undefined;
   beforeEach(async () => {
