@@ -152,9 +152,14 @@ checksum-guarded adapter preserves the Solid disposer and exposes `destroy`;
 node_modules is untouched. The authenticated Nanobot datafeed replaces Polygon.
 See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for Apache-2.0 notices and
 the documented delta. Solid stays isolated; no remote browser renders charts.
-Backend layout fields are reserved structured data; arbitrary layout options
-and freehand drawing/pan autosave are not fully projected by the current client.
-Saved explicit visible ranges, studies and validated annotations are projected.
+The agent-operated workstation extends this bridge with semantic viewport
+control, finite-anchor drawing discovery, indicators, an optional chart-only
+image renderer and ephemeral virtual agent presence. User drawings persist
+through validated backend operations; contextual **Save view** persists a human
+viewport. Unsaved pan/zoom remains transient. See
+[Cloud Chart workstation](cloud-chart-workstation.md) for the supported IR,
+library deltas, permissions and rendering limits, and the
+[implementation report](cloud-chart-workstation-report.md) for validation results.
 
 ## MetaApi, proposals and execution
 

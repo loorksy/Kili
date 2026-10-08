@@ -418,3 +418,9 @@ PERFORMANCE OF THIS SOFTWARE.
 Pillow is used for chart-only PNG rendering (HPND and compatible licenses);
 its distribution retains the upstream license notices. No browser engine,
 computer runtime or model-generated executable code is bundled.
+
+The existing build-time chart adapter also transforms only the KLineChart
+9.8.12 ESM `BarSpaceLimitConstants.MIN/MAX` from `1/50` to `0.01/10000`.
+This enables bounded semantic viewport counts without changing default spacing
+or modifying installed files. The transformation rejects a different upstream
+source hash. See `docs/cloud-chart-workstation.md` for the exact pin and delta.
