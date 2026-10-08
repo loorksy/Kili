@@ -31,6 +31,7 @@ export interface CloudChartState {
   candle_count?: number;
   right_spacing?: number;
   visible_range?: [number, number] | null;
+  history_window_id?: string | null;
 }
 export interface ChartReference {
   chart_id: string;

@@ -1399,6 +1399,11 @@ interface InboundTurnMetadata {
   turn_seq?: number;
 }
 
+export interface ChartCandleUpdate {
+  time: string; open: string; high: string; low: string; close: string;
+  volume: number | null; complete: boolean;
+}
+
 export type InboundEvent =
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
   | { event: "ready"; chat_id: string; client_id: string }
@@ -1534,6 +1539,19 @@ export type InboundEvent =
       event: "goal_state";
       chat_id: string;
       goal_state: GoalStateWsPayload;
+    }
+  | {
+      event: "cloud_chart_price";
+      chart_id: string;
+      session_key: string;
+      subscription_id: string;
+      timeframe?: string;
+      provider_instrument?: string;
+      status: "connecting" | "live" | "market_closed" | "reconnecting" | "stopped";
+      quote?: { time: string; fetched_at: string; bid: string; ask: string; provider_instrument: string; source: string };
+      candle?: ChartCandleUpdate | null;
+      candles?: ChartCandleUpdate[];
+      provisional?: boolean;
     }
   | {
       event: "cloud_chart_updated";

@@ -131,7 +131,8 @@ an owned responsibility. Only active watchers poll; grouped quote checks and
 bounded outage backoff are cheap and contain no LLM call. Conditions fire one
 stable wake; broad monitoring uses agent-selected conditions plus semantic
 reevaluation schedules. No trading methodology or default indicator strategy is
-built in. Streaming pricing is not used in this implementation.
+built in. These durable watchers retain their configured observation cadence;
+they do not invoke the LLM for individual prices.
 
 ## Cloud charts and the KLineChart Pro bridge
 
@@ -145,10 +146,24 @@ also hold execution fencing. Market refresh does not invalidate annotation edits
 Trading-chart code fences embed lazy interactive charts in existing chat.
 Authenticated backend snapshots/paged candle requests restore state after
 unmount/restart. Existing WebSocket events carry chart/revision identifiers,
-not complete histories. Visible clients receive bounded recent-candle refreshes;
-closing the chart stops client polling without removing backend state. Structured
+not complete histories. Visible clients subscribe to OANDA pricing through one
+shared, bounded backend stream and the existing authenticated WebSocket. Quotes
+update bid/ask and provisional current candles without a 30-second client poll.
+REST remains authoritative for history/completed candles. Closing/hiding charts
+releases price subscriptions without removing backend state. Structured
 timeframe/price-level controls persist user edits. Optional persisted studies
 are validated and rendered; there is no mandatory strategy.
+
+Streaming uses `stream-fxpractice.oanda.com` or `stream-fxtrade.oanda.com`, with
+the same protected OANDA secret reference. Deployment egress must allow the
+chosen streaming origin in addition to the REST origin. No credentials are sent
+to the browser. Quotes retain their provider time; inactive/disconnected feeds
+are labeled, rather than treating cached prices as live. OANDA streams sampled
+prices (at most four updates per second per instrument), not every broker tick;
+network latency and provider sampling remain. The optional WebUI capability
+`webui.cloud-chart.prices.v1` leaves protocol 1 unchanged: older clients keep
+their existing reads, and newer clients on older hosts retain chart history but
+show that the gateway needs an update for live pricing.
 
 React wraps `@klinecharts/pro` 0.1.1 with `klinecharts` 9.8.12. A build-only,
 checksum-guarded adapter preserves the Solid disposer and exposes `destroy`;

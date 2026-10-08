@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal, TypeVar
@@ -63,10 +65,19 @@ class _Price(BaseModel):
     bids: list[_PriceLevel] = Field(min_length=1)
     asks: list[_PriceLevel] = Field(min_length=1)
     tradeable: bool = True
+    status: Literal["tradeable", "non-tradeable", "invalid"] | None = None
+
+    @property
+    def is_tradeable(self) -> bool:
+        return self.status == "tradeable" if self.status is not None else self.tradeable
 
 
 class _Prices(BaseModel):
     prices: list[_Price]
+
+
+class _StreamFrame(BaseModel):
+    type: Literal["PRICE", "HEARTBEAT"]
 
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
@@ -86,6 +97,51 @@ class OandaClient:
         self.secrets = secrets or SecretStore()
         self.transport = transport
         self.base = "https://api-fxpractice.oanda.com" if connection.environment == "practice" else "https://api-fxtrade.oanda.com"
+
+    async def stream_prices(self, instruments: dict[str, str]) -> AsyncIterator[Quote]:
+        """Authenticated bounded NDJSON stream; heartbeat frames never call a model."""
+        if not instruments or len(instruments) > 100:
+            raise ValueError("A price stream needs 1–100 instruments")
+        for symbol in instruments:
+            self.validate_symbol(symbol)
+        token = self.secrets.resolve(self.connection.secret_ref)
+        origin = "https://stream-fxpractice.oanda.com" if self.connection.environment == "practice" else "https://stream-fxtrade.oanda.com"
+        transport = self.transport or PinnedDNSAsyncTransport()
+        mounts = None if self.transport else httpx_env_proxy_mounts()
+        try:
+            async with httpx.AsyncClient(transport=transport, mounts=mounts,
+                    timeout=httpx.Timeout(15, connect=20), follow_redirects=False) as client:
+                async with client.stream("GET", origin + f"/v3/accounts/{self.connection.account_id}/pricing/stream",
+                        params={"instruments": ",".join(sorted(instruments)), "snapshot": "true"},
+                        headers={"Authorization": "Bearer " + token.reveal()}) as response:
+                    if response.status_code != 200:
+                        raise ProviderUnavailableError(f"OANDA stream rejected (HTTP {response.status_code})")
+                    pending = b""
+                    # Do not request a minimum chunk size: buffering until 4 KiB
+                    # would delay small price/heartbeat frames for many seconds.
+                    async for chunk in response.aiter_bytes():
+                        pending += chunk
+                        if len(pending) > 65536:
+                            raise ProviderUnavailableError("OANDA stream frame exceeds bounded size")
+                        while b"\n" in pending:
+                            line, pending = pending.split(b"\n", 1)
+                            if not line.strip():
+                                continue
+                            frame = token.redact(json.loads(line))
+                            if parse_provider(_StreamFrame, frame).type == "HEARTBEAT":
+                                continue
+                            price = parse_provider(_Price, frame)
+                            if price.instrument not in instruments:
+                                continue
+                            bid, ask = price.bids[0].price, price.asks[0].price
+                            if not bid.is_finite() or not ask.is_finite() or not 0 < bid <= ask:
+                                raise ProviderUnavailableError("OANDA stream returned invalid pricing")
+                            yield Quote(canonical_instrument=instruments[price.instrument],
+                                provider_instrument=price.instrument, time=price.time, bid=bid, ask=ask,
+                                source="oanda", fetched_at=datetime.now(timezone.utc), tradable=price.is_tradeable)
+                    raise ProviderUnavailableError("OANDA price stream ended")
+        except (httpx.HTTPError, ValueError):
+            raise ProviderUnavailableError("OANDA price stream unavailable") from None
 
     async def _get(self, path: str, params: dict[str, str] | None = None) -> object:
         token = self.secrets.resolve(self.connection.secret_ref)
@@ -129,7 +185,7 @@ class OandaClient:
             raise ProviderUnavailableError("OANDA returned no quote for this instrument")
         return Quote(canonical_instrument=canonical, provider_instrument=symbol, time=price.time,
                      bid=price.bids[0].price, ask=price.asks[0].price, source="oanda",
-                     fetched_at=datetime.now(timezone.utc), tradable=price.tradeable)
+                     fetched_at=datetime.now(timezone.utc), tradable=price.is_tradeable)
 
     async def candles(self, symbol: str, canonical: str, timeframe: str, *, count: int = 500,
                       before: str | None = None, price: Literal["M"] = "M") -> list[Candle]:

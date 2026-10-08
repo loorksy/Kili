@@ -4,16 +4,20 @@ import { useClient } from "@/providers/ClientProvider";
 import { fetchCloudChart, fetchChartCandles, updateCloudChart } from "@/lib/api";
 import { parseChartReference, type CloudChartState } from "./contract";
 import { mountCloudChart, type ChartMount } from "./pro-adapter";
+import { observeChartPrices, type ChartPriceEvent } from "./live-feed";
 
 export function CloudChart({ reference }: { reference: string }) {
   const parsed = parseChartReference(reference);
   const chartId = parsed?.chart_id;
   const sessionKey = parsed?.session_key;
-  const { client, token } = useClient();
+  const { client, token, webuiCapabilities } = useClient();
+  const liveSupported = webuiCapabilities.includes("webui.cloud-chart.prices.v1");
   const [chart, setChart] = useState<CloudChartState | null>(null);
   const [error, setError] = useState("");
   const [drawingTool, setDrawingTool] = useState("");
   const [price, setPrice] = useState("");
+  const [liveQuote, setLiveQuote] = useState<ChartPriceEvent["quote"]>();
+  const [liveStatus, setLiveStatus] = useState("connecting");
   const mountedChart = useRef<ChartMount | null>(null);
   const container = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -32,33 +36,31 @@ export function CloudChart({ reference }: { reference: string }) {
   useEffect(() => {
     if (!chart || !container.current || !chartId || !sessionKey) return;
     let closed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const stopFeed = () => { if (timer) clearTimeout(timer); timer = undefined; };
+    let stopPrices: (() => void) | undefined;
+    const stopFeed = () => { stopPrices?.(); stopPrices = undefined; };
+    setLiveQuote(undefined);
+    setLiveStatus(liveSupported ? "connecting" : "Live pricing needs a gateway update.");
     const feed: Datafeed = {
       searchSymbols: async () => [{ ticker: chart.provider_instrument, name: chart.canonical_instrument }],
       getHistoryKLineData: async (_symbol, _period, _from, to) => {
         const page = await fetchChartCandles(token, chartId, sessionKey, new Date(chart.visible_range ? Math.min(chart.visible_range[1] + 1, to) : to).toISOString(), chart.candle_count ?? 200);
         if (closed) return [];
+        setError(page.stale ? "Showing cached market data; provider unavailable." : "");
         return page.candles.map(c => ({ timestamp: Date.parse(c.time), open: Number(c.open), high: Number(c.high),
           low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 }));
       },
       subscribe: (_symbol, _period, callback) => {
         stopFeed();
-        const refresh = async () => {
-          if (closed) return;
-          try {
-            if (!document.hidden) {
-              const page = await fetchChartCandles(token, chartId, sessionKey, undefined, 2);
-              if (!closed) {
-                for (const c of page.candles) callback({ timestamp: Date.parse(c.time), open: Number(c.open),
-                  high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 });
-                setError(page.stale ? "Showing cached market data; provider unavailable." : "");
-              }
-            }
-          } catch { if (!closed) setError("Market updates unavailable. Retrying…"); }
-          if (!closed) timer = setTimeout(() => void refresh(), 30_000);
-        };
-        timer = setTimeout(() => void refresh(), 30_000);
+        if (!liveSupported) return;
+        stopPrices = observeChartPrices(client, chartId, sessionKey, event => {
+          if (closed || event.timeframe !== chart.timeframe || (event.quote?.provider_instrument ?? event.provider_instrument) !== chart.provider_instrument) return;
+          if (event.quote) setLiveQuote(event.quote);
+          // A saved historical viewport must not jump to the live candle.
+          if (!chart.visible_range && !chart.history_window_id) {
+            for (const c of event.candles ?? (event.candle ? [event.candle] : [])) callback({ timestamp: Date.parse(c.time),
+              open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: c.volume ?? 0 });
+          }
+        }, status => { if (!closed) setLiveStatus(status); });
       },
       unsubscribe: stopFeed,
     };
@@ -73,7 +75,7 @@ export function CloudChart({ reference }: { reference: string }) {
     } });
     mountedChart.current = destroy;
     return () => { closed = true; stopFeed(); destroy(); if (mountedChart.current === destroy) mountedChart.current = null; };
-  }, [chart, chartId, sessionKey, token, drawingTool, client]);
+  }, [chart, chartId, sessionKey, token, drawingTool, client, liveSupported]);
   async function change(operation: Record<string, unknown>) {
     if (!chart || !sessionKey) return;
     try {
@@ -86,6 +88,10 @@ export function CloudChart({ reference }: { reference: string }) {
     <div className="flex flex-wrap items-center gap-2 p-2 text-xs">
       <span>{chart?.canonical_instrument ?? "Loading chart…"}</span>
       <span className="text-muted-foreground">OANDA</span>
+      <span aria-label="Market feed status" className="text-muted-foreground">{liveStatus}</span>
+      {liveQuote && <span aria-label="Live market quote" title={`OANDA · ${liveQuote.time} · Live candles are provisional; volume unavailable`}>
+        Bid {liveQuote.bid} / Ask {liveQuote.ask} · {new Date(liveQuote.time).toLocaleTimeString()}
+      </span>}
       {chart && <select aria-label="Chart timeframe" value={chart.timeframe} onChange={e => void change({ operation: "set_timeframe", timeframe: e.target.value })}>
         {["M1", "M5", "M15", "M30", "H1", "H4", "D", "W", "M"].map(tf => <option key={tf}>{tf}</option>)}
       </select>}

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from loguru import logger
+from pydantic import TypeAdapter
 from websockets.asyncio.server import ServerConnection
 
 from nanobot.bus.events import INBOUND_META_USER_SHELL
@@ -36,6 +37,7 @@ from nanobot.session.webui_turns import (
 )
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
+from nanobot.webui.chart_stream import ChartStreams
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
 from nanobot.webui.file_preview import (
     WebUIFilePreviewError,
@@ -156,6 +158,7 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
+        self._chart_streams = ChartStreams(gateway, transport.webui_send_event)
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return self._http_router.workspace_project_selection_available(connection)
@@ -206,6 +209,7 @@ class WebUICommandRouter:
 
     async def cleanup_connection(self, connection: ServerConnection) -> None:
         """Release command-owned state associated with one transport connection."""
+        await self._chart_streams.disconnect(connection)
         chat_ids = self._transport.webui_connection_chats(connection)
         for chat_id in chat_ids:
             if self._temporary_chats.owns(connection, chat_id):
@@ -787,6 +791,20 @@ class WebUICommandRouter:
             )
             return
 
+        if action in {"chart.price_subscribe", "chart.price_unsubscribe"}:
+            # Connection-owned and ephemeral: never replay a cached subscription
+            # from a previous socket. The authentication check above is required.
+            try:
+                async with self.request_locks.setdefault(connection, asyncio.Lock()):
+                    result = await self._chart_streams.change(connection, TypeAdapter(dict[str, object]).validate_python(payload),
+                        subscribe=action == "chart.price_subscribe")
+                await self.send_webui_response(connection, request_id, result=result)
+            except PermissionError:
+                await self.send_webui_response(connection, request_id, status=403, message="Chart access denied")
+            except ValueError:
+                await self.send_webui_response(connection, request_id, status=400, message="Chart price subscription unavailable")
+            return
+
         if action == "temporary_chat.file_preview":
             # Connection-owned, read-only, and deliberately outside the mutation
             # replay cache: private paths/content must not outlive this request.
@@ -1020,6 +1038,7 @@ class WebUICommandRouter:
 
     async def close(self) -> None:
         """Cancel command work and release application-owned gateway state."""
+        await self._chart_streams.close()
         delivery_tasks = tuple(self.request_tasks.values())
         operation_tasks = tuple(operation.task for operation in self.request_operations.values())
         for task in (*delivery_tasks, *operation_tasks):

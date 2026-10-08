@@ -71,6 +71,25 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  it("projects live chart prices without creating chat replay or model activity", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: url => new FakeSocket(url) as unknown as WebSocket });
+    const received = vi.fn(), chat = vi.fn();
+    window.addEventListener("nanobot-cloud-chart-price", received);
+    client.onChat("main", chat);
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const event = { event: "cloud_chart_price", chart_id: "chart_test", session_key: "websocket:main",
+      subscription_id: "current", status: "live", quote: { bid: "2700", ask: "2701", time: "2026-10-07T19:00:00Z" } };
+    socket.fakeMessage(event);
+    expect(received).toHaveBeenCalledOnce();
+    expect(received.mock.calls[0][0].detail).toEqual(event);
+    expect(chat).not.toHaveBeenCalled();
+    window.removeEventListener("nanobot-cloud-chart-price", received);
+    client.close();
+  });
+
   it("bounds regular replay tails but retains temporary events until discard", async () => {
     const client = new NanobotClient({
       url: "ws://test", reconnect: false,

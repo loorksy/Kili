@@ -1360,6 +1360,10 @@ export function fetchCloudChart(token: string, chartId: string, sessionKey: stri
   return request<import("@/components/charts/contract").CloudChartState>(
     `/api/webui/cloud-charts?chart_id=${encodeURIComponent(chartId)}&session_key=${encodeURIComponent(sessionKey)}`, token);
 }
+export function subscribeChartPrices(transport: WebUIMutationTransport, chartId: string, sessionKey: string, subscriptionId: string, subscribe: boolean) {
+  return mutation<{ subscribed: boolean }>(transport, subscribe ? "chart.price_subscribe" : "chart.price_unsubscribe",
+    { chart_id: chartId, session_key: sessionKey, subscription_id: subscriptionId });
+}
 export function fetchChartCandles(token: string, chartId: string, sessionKey: string, before?: string, count = 500) {
   const query = new URLSearchParams({ chart_id: chartId, session_key: sessionKey, count: String(count) });
   if (before) query.set("before", before);

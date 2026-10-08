@@ -26,6 +26,34 @@ recent bounded windows, plus the linked active window, are retained. Client
 history pages and agent scenes use the same source/instrument/timeframe. Fetches
 update matching cached window candles; outages can use cached window evidence.
 
+## Live prices and candle updates
+
+Open, visible charts use connection-owned `chart.price_subscribe` and
+`chart.price_unsubscribe` requests on the existing authenticated WebSocket.
+Subscriptions require an existing conversation and authorized chart; bindings,
+connection configuration and permissions are checked again before each update.
+Socket loss, chart close/hidden tab, changed binding and gateway shutdown release
+subscriptions. Reconnect creates a fresh subscription; no replayed authorization
+or model turn is involved. Shared instruments use one account price stream,
+with at most 100 instruments, 256 consumers and 16 charts per connection.
+Each slow consumer retains only its newest pending update. Retries back off
+from one to thirty seconds; missing heartbeats/read timeouts reconnect safely.
+
+`cloud_chart_price` delivers small timestamped Decimal quote payloads and
+provisional current-candle updates. REST history fetches/reconciliation happen
+independently and cannot delay the live quote. Each subscription restores its
+bounded recent candle window once, including reconnect after downtime; subsequent
+reconciliation sends at most two bars, not full history on every tick.
+Completed candles come from REST;
+live candles use observed midpoints with unavailable volume, not an invented
+tick count. Daily/weekly rollover respects OANDA's default New York alignment
+and DST. History/annotations and chart identity remain durable; ticks, cursors
+and subscriptions do not become a new persistence format. Saved historical
+viewports do not jump to the live candle. The UI shows bid/ask, source time,
+reconnection/closed-market status and stale quotes, and does not remount the
+chart for each price. This live chart feed does not alter durable watchers'
+configured cadence, broker execution, approvals or autonomous-trading settings.
+
 ## Drawings and concurrent edits
 
 Capability metadata is extracted from installed KLineChart **9.8.12** and Pro
@@ -116,6 +144,24 @@ family return the existing identical version. Discovery returns metadata rather
 than injecting the whole library into model context.
 
 ## Visual perception
+
+### Sending a chart picture
+
+When the user requests an image, call `chart_snapshot` with `format="attachment"`.
+This writes a bounded PNG and metadata to the instance's existing
+`media/charts/<date>/` artifact storage and returns a real artifact path.
+Call the existing `message` tool with that path in `media` to send it to the
+current conversation/channel. Export needs neither a vision-capable model nor
+an image-generation provider. `format="image"` remains internal vision input,
+not user attachment delivery. `format="structured"` remains the default.
+Snapshots use the selected cached OANDA scene and its freshness metadata, not
+screenshots of the UI or unrelated private content. No trading mutation occurs.
+
+The bundled unmodified DejaVu Sans font includes Arabic glyphs. Pillow RAQM
+layout (included in normal Pillow wheels) provides Arabic shaping and bidi
+layout. Deployments building Pillow themselves need RAQM for connected RTL
+text. No host font installation or browser renderer is necessary; license
+notices and the font ship with the Python package.
 
 `chart_snapshot` defaults to structured data, usable by models without vision.
 An image-capable model can explicitly request `format=image`, receiving a native
