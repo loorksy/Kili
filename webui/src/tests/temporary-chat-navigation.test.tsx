@@ -1,6 +1,6 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
@@ -97,6 +97,14 @@ async function selectTopic(name: string) {
 }
 
 describe("temporary chat navigation", () => {
+  beforeAll(async () => {
+    // Navigation persistence assertions should not race cold compilation of
+    // lazily loaded route modules; retain every existing assertion/deadline.
+    await Promise.all([
+      import("@/components/thread/ThreadShell"),
+      import("@/components/settings/SettingsView"),
+    ]);
+  });
   beforeEach(() => {
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({ token: "test", api_token: "test", ws_path: "/" });
     groupedTopics = false;
