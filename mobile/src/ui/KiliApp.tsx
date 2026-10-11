@@ -51,6 +51,7 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
   const [charts, setCharts] = useState<Record<string, unknown>[]>([]);
   const [candles, setCandles] = useState<Record<string, unknown>[]>([]);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
+  const [agents, setAgents] = useState<Array<Record<string, unknown>>>([]);
   const [sheet, setSheet] = useState<"timeframes" | "drawings" | null>(null);
   const direction = directionFor(locale);
   const t = (key: CopyKey) => translate(locale, key);
@@ -290,6 +291,19 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
             <Pressable style={styles.secondary} onPress={() => setLocale("en")}><Text style={styles.secondaryText}>English</Text></Pressable>
             <Pressable style={styles.secondary} onPress={() => setLocale("ar")}><Text style={styles.secondaryText}>العربية</Text></Pressable>
           </View>
+          <Text style={styles.muted}>{t("agents")}</Text>
+          {agents.map(agent => (
+            <Pressable key={String(agent.id)} style={styles.card} onPress={() => {
+              const key = String(agent.session_key);
+              setTab("chats");
+              setActive({ key, chatId: key.replace(/^websocket:/, ""), title: String(agent.name), updatedAt: null });
+            }}>
+              <Text style={styles.cardTitle}>{String(agent.name)}</Text>
+            </Pressable>
+          ))}
+          <Pressable style={styles.secondary} onPress={() => void client?.agents().then(roster => setAgents(roster.agents)).catch(reason => setError(reason instanceof Error ? reason.message : "offline"))}>
+            <Text style={styles.secondaryText}>{t("createAgent")}</Text>
+          </Pressable>
           <Pressable style={styles.secondary} onPress={() => { setToken(null); void clearCredentials(store); }}>
             <Text style={styles.secondaryText}>{t("logout")}</Text>
           </Pressable>

@@ -1452,6 +1452,31 @@ export function controlTradingMission(transport: WebUIMutationTransport, session
     session_key: sessionKey, mandate_id: mandateId, operation, ...(fingerprint ? { fingerprint } : {}),
   });
 }
+export interface KiliAgentSummary {
+  id: string;
+  name: string;
+  instructions: string;
+  session_key: string;
+}
+export interface KiliGroupSummary {
+  id: string;
+  name: string;
+  session_key: string;
+  member_ids: string[];
+  members: { id: string; name: string }[];
+}
+export function fetchAgentRoster(token: string) {
+  return request<{ agents: KiliAgentSummary[]; groups: KiliGroupSummary[] }>("/api/webui/agents", token);
+}
+export function createKiliAgent(transport: WebUIMutationTransport, name: string, instructions: string) {
+  return mutation<KiliAgentSummary>(transport, "agents.create", { name, instructions });
+}
+export function createKiliGroup(transport: WebUIMutationTransport, name: string, memberIds: string[]) {
+  return mutation<KiliGroupSummary>(transport, "agents.group", { name, member_ids: memberIds });
+}
+export function changeKiliGroupMember(transport: WebUIMutationTransport, groupId: string, agentId: string, operation: "add" | "remove") {
+  return mutation<KiliGroupSummary>(transport, "agents.members", { group_id: groupId, agent_id: agentId, operation });
+}
 export function configureAutonomousTrading(transport: WebUIMutationTransport, enabled: boolean) {
   return mutation<IntegrationStatus>(transport, "settings.integrations.autonomy", { enabled });
 }

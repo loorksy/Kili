@@ -184,6 +184,9 @@ _WEBUI_MUTATION_PATHS = {
     "remote.remove": "/api/remote-instances/remove",
     "remote.fingerprint": "/api/remote-instances/fingerprint",
     "remote.trust": "/api/remote-instances/trust",
+    "agents.create": "/api/webui/agents",
+    "agents.group": "/api/webui/agent-groups",
+    "agents.members": "/api/webui/agent-groups/members",
     "automation.enable": "/api/webui/automations/enable",
     "automation.disable": "/api/webui/automations/disable",
     "automation.delete": "/api/webui/automations/delete",
@@ -653,6 +656,10 @@ class GatewayHTTPHandler:
 
         # Automation routes
         response = await self._dispatch_automation_routes(request, got)
+        if response is not None:
+            return response
+
+        response = self._dispatch_agent_routes(request, got)
         if response is not None:
             return response
 
@@ -1488,6 +1495,31 @@ class GatewayHTTPHandler:
         )
 
     # -- Automation routes --------------------------------------------------
+
+    def _dispatch_agent_routes(self, request: WsRequest, got: str) -> Response | None:
+        if got not in {"/api/webui/agents", "/api/webui/agent-groups", "/api/webui/agent-groups/members"}:
+            return None
+        if not self.check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self.session_manager is None:
+            return _http_error(404, "Conversations are unavailable")
+        from nanobot.agents.roster import AgentDraft, AgentRoster, GroupDraft, MembershipChange
+        roster = AgentRoster(self.session_manager)
+        payload = _mutation_payload(request)
+        try:
+            if got == "/api/webui/agents" and payload is None:
+                result = roster.list_state()
+            elif got == "/api/webui/agents" and payload is not None:
+                result = roster.create_agent(AgentDraft.model_validate(payload))
+            elif got == "/api/webui/agent-groups" and payload is not None:
+                result = roster.create_group(GroupDraft.model_validate(payload))
+            elif got == "/api/webui/agent-groups/members" and payload is not None:
+                result = roster.change_member(MembershipChange.model_validate(payload))
+            else:
+                return _http_error(405, "Agent changes require authenticated WebSocket")
+        except (ValueError, PermissionError) as exc:
+            return _http_error(400, str(exc))
+        return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
 
     async def _dispatch_automation_routes(
         self,

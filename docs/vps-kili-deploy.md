@@ -94,3 +94,7 @@ Mobile pairing uses the same public origin `https://kili.lork.cloud` and the sam
 There are no old watcher rows to migrate. The gateway reconciles watcher rows on startup and on each due pass.
 
 Stopping Rakazo after this must leave Kili's env file, secret file, and config in place. Do not point Kili back at `/opt/rakazo`.
+
+Approvals and mandates use the Approve and Deny buttons in the WebUI and mobile app. Those buttons send the exact stored action fingerprint to an owner-only endpoint. `/approve` remains a hidden fallback, and the agent is instructed not to ask for it.
+
+The sidebar can create persistent agents and group chats. Each agent has its own conversation and instructions. A group handoff does not copy an approval card or transfer a mandate. There is no per-agent computer or browser sandbox.

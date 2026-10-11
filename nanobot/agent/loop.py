@@ -1226,11 +1226,19 @@ class AgentLoop:
             message_metadata=request_metadata,
             session_metadata=session.metadata if session is not None else None,
         )
+        agent_profile = None
+        if session is not None:
+            from nanobot.agents.roster import agent_profile_for_turn
+            speaker = request_metadata.get("kili_speaker_id")
+            if isinstance(speaker, str) and isinstance(session.metadata.get("kili_group_id"), str):
+                session.metadata["kili_speaker_id"] = speaker
+            agent_profile = agent_profile_for_turn(session.metadata, request_metadata)
         transcript_builder = partial(
             self.context.build_transcript,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
+            agent_profile=agent_profile,
         )
         if request_context is None:
             request_ctx = dataclasses.replace(

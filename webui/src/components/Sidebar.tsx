@@ -88,6 +88,7 @@ interface SidebarProps {
   runningChatIds?: string[];
   updatedChatIds?: string[];
   recoveryChatIds?: string[];
+  agentRoster?: ReactNode;
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
@@ -253,6 +254,7 @@ export function Sidebar(props: SidebarProps) {
               props.containActionMenus ? menuPortalContainer : undefined
             }
           />
+          {props.agentRoster}
           </>
         )}
       </div>

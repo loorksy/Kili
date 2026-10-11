@@ -164,6 +164,15 @@ export class KiliClient {
     return body.candles ?? [];
   }
 
+  async agents(): Promise<{ agents: Record<string, unknown>[]; groups: Record<string, unknown>[] }> {
+    const response = await this.fetchImpl(`${this.connection.baseUrl}/api/webui/agents`, {
+      headers: authHeaders(this.connection.token),
+    });
+    if (!response.ok) throw new Error("offline");
+    const body = await response.json() as { agents?: Record<string, unknown>[]; groups?: Record<string, unknown>[] };
+    return { agents: body.agents ?? [], groups: body.groups ?? [] };
+  }
+
   async automations(): Promise<Record<string, unknown>[]> {
     const response = await this.fetchImpl(`${this.connection.baseUrl}/api/webui/automations`, {
       headers: authHeaders(this.connection.token),
