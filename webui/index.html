@@ -47,7 +47,7 @@
         color: #0a0a0a;
         font-family:
           system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, "Noto Sans", "Noto Sans SC",
+          "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Arabic", "Noto Naskh Arabic", "Noto Sans SC",
           "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
           sans-serif;
       }
@@ -175,6 +175,10 @@
           id: {
             boot: "Memuat nanobot…",
             description: "UI web nanobot — ngobrol dengan ruang kerja nanobot Anda."
+          },
+          ar: {
+            boot: "جارٍ تحميل nanobot…",
+            description: "واجهة nanobot على الويب — تحاور مع مساحة عمل nanobot."
           }
         };
 
@@ -198,6 +202,9 @@
           if (lower === "pt" || lower.indexOf("pt-") === 0) {
             return "pt-BR";
           }
+          if (lower === "ar" || lower.indexOf("ar-") === 0) {
+            return "ar";
+          }
           var base = lower.split("-")[0];
           return copy[base] ? base : "en";
         }
@@ -212,6 +219,7 @@
           var locale = normalizeLocale(detected);
           var localized = copy[locale] || copy.en;
           document.documentElement.lang = locale;
+          document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
           var description = document.querySelector('[data-i18n-meta=\"description\"]');
           if (description) description.setAttribute("content", localized.description);
           var boot = document.querySelector("[data-boot-copy]");

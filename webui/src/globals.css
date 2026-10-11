@@ -11,6 +11,16 @@
 
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
+  html[dir="rtl"] body {
+    font-family:
+      "Noto Sans Arabic", "Noto Naskh Arabic", system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .unicode-bidi-isolate {
+    unicode-bidi: isolate;
+  }
+
   :root {
     color-scheme: light;
     --background: 0 0% 100%;

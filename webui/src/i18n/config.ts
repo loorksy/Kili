@@ -11,6 +11,7 @@ export const supportedLocales = [
   { code: "pt-BR", nativeLabel: "Português (Brasil)" },
   { code: "vi", nativeLabel: "Tiếng Việt" },
   { code: "id", nativeLabel: "Bahasa Indonesia" },
+  { code: "ar", nativeLabel: "العربية" },
 ] as const;
 
 export type SupportedLocale = (typeof supportedLocales)[number]["code"];
@@ -43,6 +44,9 @@ export function normalizeLocale(
   if (lower === "pt" || lower.startsWith("pt-")) {
     return "pt-BR";
   }
+  if (lower === "ar" || lower.startsWith("ar-")) {
+    return "ar";
+  }
 
   const base = lower.split("-")[0];
   const baseMatch = supportedLocales.find(
@@ -61,8 +65,34 @@ function readStoredLocale(): SupportedLocale | null {
   }
 }
 
+function matchesSupportedLocale(input: string): boolean {
+  const trimmed = input.trim();
+  if (!trimmed) return false;
+  if (supportedLocales.some((locale) => locale.code === trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  if (lower === "zh" || lower.startsWith("zh-")) return true;
+  if (lower === "pt" || lower.startsWith("pt-")) return true;
+  if (lower === "ar" || lower.startsWith("ar-")) return true;
+  const base = lower.split("-")[0];
+  return supportedLocales.some((locale) => locale.code.toLowerCase() === base);
+}
+
+export function detectDeviceLocale(): SupportedLocale {
+  if (typeof navigator === "undefined") return defaultLocale;
+  const candidates = [...(navigator.languages ?? []), navigator.language];
+  for (const candidate of candidates) {
+    if (!candidate || !matchesSupportedLocale(candidate)) continue;
+    return normalizeLocale(candidate);
+  }
+  return defaultLocale;
+}
+
+export function localeDirection(locale: SupportedLocale): "ltr" | "rtl" {
+  return locale === "ar" ? "rtl" : "ltr";
+}
+
 export function resolveInitialLocale(): SupportedLocale {
-  return readStoredLocale() ?? defaultLocale;
+  return readStoredLocale() ?? detectDeviceLocale();
 }
 
 export function persistLocale(locale: SupportedLocale): void {
@@ -77,4 +107,5 @@ export function persistLocale(locale: SupportedLocale): void {
 export function applyDocumentLocale(locale: SupportedLocale): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
+  document.documentElement.dir = localeDirection(locale);
 }

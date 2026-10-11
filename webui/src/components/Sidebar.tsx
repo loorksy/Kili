@@ -198,6 +198,64 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
 
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
+          collapsed && "pointer-events-none opacity-0",
+        )}
+      >
+        {!collapsed && (
+          <>
+            <p className="px-4 pb-1 text-[11px] font-medium text-sidebar-muted-foreground">
+              {t("sidebar.sections.chats")}
+            </p>
+            <ChatList
+            sessions={props.sessions}
+            temporarySessions={props.temporarySessions}
+            activeKey={props.activeKey}
+            loading={props.loading}
+            emptyLabel={t("chat.noSessions")}
+            onSelect={props.onSelect}
+            onCloseTemporaryChat={props.onCloseTemporaryChat}
+            onRequestDelete={props.onRequestDelete}
+            onRequestDeleteMany={props.onRequestDeleteMany}
+            onTogglePin={props.onTogglePin}
+            onRequestRename={props.onRequestRename}
+            onRequestRenameTab={props.onRequestRenameTab}
+            onToggleArchive={props.onToggleArchive}
+            paneGroups={props.paneGroups}
+            onSelectPane={props.onSelectPane}
+            onCreateTab={props.onCreateTab}
+            onDetachPane={props.onDetachPane}
+            onDissolveTab={props.onDissolveTab}
+            onAttachPane={props.onAttachPane}
+            onToggleGroup={props.onToggleGroup}
+            onRequestRenameProject={props.onRequestRenameProject}
+            onNewChatInProject={props.onNewChatInProject}
+            pinnedKeys={props.pinnedKeys}
+            archivedKeys={props.archivedKeys}
+            pinnedPaneKeys={props.pinnedPaneKeys}
+            archivedPaneKeys={props.archivedPaneKeys}
+            sessionOrder={props.sessionOrder}
+            titleOverrides={props.titleOverrides}
+            projectNameOverrides={props.projectNameOverrides}
+            collapsedGroups={props.collapsedGroups}
+            runningChatIds={props.runningChatIds}
+            updatedChatIds={props.updatedChatIds}
+            recoveryChatIds={props.recoveryChatIds}
+            density={props.viewState?.density}
+            showPreviews={props.viewState?.show_previews}
+            showTimestamps={props.viewState?.show_timestamps}
+            sort={props.viewState?.sort}
+            showArchived={props.showArchived}
+            defaultWorkspacePath={props.defaultWorkspacePath}
+            actionMenuPortalContainer={
+              props.containActionMenus ? menuPortalContainer : undefined
+            }
+          />
+          </>
+        )}
+      </div>
       <SidebarSelectionHighlight
         targetRef={activeActionRef}
         activeId={activeActionId}
@@ -207,6 +265,11 @@ export function Sidebar(props: SidebarProps) {
           collapsed ? "flex w-14 flex-col items-center px-0" : "flex flex-col px-2",
         )}
       >
+        {!collapsed && (
+          <p className="px-2 pb-1 pt-1 text-[11px] font-medium text-sidebar-muted-foreground">
+            {t("sidebar.sections.tools")}
+          </p>
+        )}
         {collapsed && <>{newChatButton}{searchButton}</>}
         <SidebarActionButton
           collapsed={collapsed}
@@ -261,59 +324,6 @@ export function Sidebar(props: SidebarProps) {
           />
         ) : null}
       </SidebarSelectionHighlight>
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-200",
-          collapsed && "pointer-events-none opacity-0",
-        )}
-      >
-        {!collapsed && (
-          <ChatList
-            sessions={props.sessions}
-            temporarySessions={props.temporarySessions}
-            activeKey={props.activeKey}
-            loading={props.loading}
-            emptyLabel={t("chat.noSessions")}
-            onSelect={props.onSelect}
-            onCloseTemporaryChat={props.onCloseTemporaryChat}
-            onRequestDelete={props.onRequestDelete}
-            onRequestDeleteMany={props.onRequestDeleteMany}
-            onTogglePin={props.onTogglePin}
-            onRequestRename={props.onRequestRename}
-            onRequestRenameTab={props.onRequestRenameTab}
-            onToggleArchive={props.onToggleArchive}
-            paneGroups={props.paneGroups}
-            onSelectPane={props.onSelectPane}
-            onCreateTab={props.onCreateTab}
-            onDetachPane={props.onDetachPane}
-            onDissolveTab={props.onDissolveTab}
-            onAttachPane={props.onAttachPane}
-            onToggleGroup={props.onToggleGroup}
-            onRequestRenameProject={props.onRequestRenameProject}
-            onNewChatInProject={props.onNewChatInProject}
-            pinnedKeys={props.pinnedKeys}
-            archivedKeys={props.archivedKeys}
-            pinnedPaneKeys={props.pinnedPaneKeys}
-            archivedPaneKeys={props.archivedPaneKeys}
-            sessionOrder={props.sessionOrder}
-            titleOverrides={props.titleOverrides}
-            projectNameOverrides={props.projectNameOverrides}
-            collapsedGroups={props.collapsedGroups}
-            runningChatIds={props.runningChatIds}
-            updatedChatIds={props.updatedChatIds}
-            recoveryChatIds={props.recoveryChatIds}
-            density={props.viewState?.density}
-            showPreviews={props.viewState?.show_previews}
-            showTimestamps={props.viewState?.show_timestamps}
-            sort={props.viewState?.sort}
-            showArchived={props.showArchived}
-            defaultWorkspacePath={props.defaultWorkspacePath}
-            actionMenuPortalContainer={
-              props.containActionMenus ? menuPortalContainer : undefined
-            }
-          />
-        )}
-      </div>
       <div
         className={cn(
           "flex items-center justify-between gap-1 bg-sidebar/55 px-2.5 py-3 text-xs",
