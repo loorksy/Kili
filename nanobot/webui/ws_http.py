@@ -1496,8 +1496,30 @@ class GatewayHTTPHandler:
 
     # -- Automation routes --------------------------------------------------
 
+    def _home_routines(self) -> list[dict[str, str]]:
+        from nanobot.webui.session_automations import all_automations_payload
+        payload = all_automations_payload(
+            self.cron_service,
+            local_trigger_store=self.local_trigger_store,
+            session_manager=self.session_manager,
+            pending_job_ids=self._pending_cron_job_ids_for_all(),
+        )
+        rows: list[dict[str, str]] = []
+        for job in payload.get("jobs", []):
+            if not isinstance(job, dict):
+                continue
+            message = job.get("payload")
+            subtitle = ""
+            if isinstance(message, dict) and isinstance(message.get("message"), str):
+                subtitle = message["message"][:120]
+            schedule = job.get("schedule")
+            if not subtitle and isinstance(schedule, dict):
+                subtitle = str(schedule.get("kind") or "")
+            rows.append({"id": str(job.get("id") or ""), "name": str(job.get("name") or "Routine"), "subtitle": subtitle})
+        return rows
+
     def _dispatch_agent_routes(self, request: WsRequest, got: str) -> Response | None:
-        if got not in {"/api/webui/agents", "/api/webui/agent-groups", "/api/webui/agent-groups/members"}:
+        if got not in {"/api/webui/agents", "/api/webui/home", "/api/webui/agent-groups", "/api/webui/agent-groups/members"}:
             return None
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1507,7 +1529,12 @@ class GatewayHTTPHandler:
         roster = AgentRoster(self.session_manager)
         payload = _mutation_payload(request)
         try:
-            if got == "/api/webui/agents" and payload is None:
+            if got == "/api/webui/home" and payload is None:
+                query = _request_query(request)
+                kind = (_query_first(query, "filter") or "all")
+                text = _query_first(query, "q") or ""
+                result = roster.home_feed(text, kind, self._home_routines())
+            elif got == "/api/webui/agents" and payload is None:
                 result = roster.list_state()
             elif got == "/api/webui/agents" and payload is not None:
                 result = roster.create_agent(AgentDraft.model_validate(payload))

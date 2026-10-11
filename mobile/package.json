@@ -8,7 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/i18n.test.ts src/kili/protocol.test.ts src/kili/session.test.ts"
+    "test": "node --experimental-strip-types --test src/i18n.test.ts src/home/feed.test.ts src/kili/protocol.test.ts src/kili/session.test.ts"
   },
   "dependencies": {
     "expo": "~53.0.20",

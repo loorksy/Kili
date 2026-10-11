@@ -1465,11 +1465,25 @@ export interface KiliGroupSummary {
   member_ids: string[];
   members: { id: string; name: string }[];
 }
+export interface HomeFeedItem {
+  kind: "bot" | "group" | "file" | "routine";
+  id: string;
+  title: string;
+  subtitle: string;
+  updated_at: number | null;
+  session_key: string | null;
+  shape: string;
+  color: string;
+}
+export function fetchHome(token: string, query = "", filter = "all") {
+  const params = new URLSearchParams({ q: query, filter });
+  return request<{ items: HomeFeedItem[]; filters: string[] }>(`/api/webui/home?${params}`, token);
+}
 export function fetchAgentRoster(token: string) {
   return request<{ agents: KiliAgentSummary[]; groups: KiliGroupSummary[] }>("/api/webui/agents", token);
 }
-export function createKiliAgent(transport: WebUIMutationTransport, name: string, instructions: string) {
-  return mutation<KiliAgentSummary>(transport, "agents.create", { name, instructions });
+export function createKiliAgent(transport: WebUIMutationTransport, name: string, instructions: string, shape = "blob", color = "#3b82f6") {
+  return mutation<KiliAgentSummary>(transport, "agents.create", { name, instructions, shape, color });
 }
 export function createKiliGroup(transport: WebUIMutationTransport, name: string, memberIds: string[]) {
   return mutation<KiliGroupSummary>(transport, "agents.group", { name, member_ids: memberIds });

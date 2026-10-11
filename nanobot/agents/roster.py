@@ -14,13 +14,20 @@ from nanobot.session.records import RecordStore, RuntimeRecord
 
 _FENCE = re.compile(r"```(?:action_approval|trading_mission)\b.*?```", re.DOTALL)
 _SLASH = re.compile(r"(?m)^[ \t]*/(?:approve|deny)\b.*$")
+_FILE = re.compile(r"\b[\w./-]+\.(?:png|jpe?g|pdf|csv|txt|md|json|xlsx)\b", re.IGNORECASE)
 _MAX_HANDOFF_DEPTH = 3
+AVATAR_SHAPES = ("blob", "pebble", "square", "spark", "flower", "heart", "drop", "oval", "triangle", "gem", "hexagon")
+AVATAR_COLORS = ("#f4f4f5", "#8a5a3b", "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280")
+HOME_FILTERS = ("all", "messages", "bots", "groups", "files", "routines")
+_DEFAULT_FOCUS = "Help the owner with this focus. Never ask them to type /approve."
+_DEFAULT_COLOR = "#3b82f6"
 
 
 class KiliAgent(RuntimeRecord):
     name: str = Field(min_length=1, max_length=80)
     instructions: str = Field(min_length=1, max_length=4000)
     session_key: str
+    shape: str = "blob"
     color: str = ""
 
 
@@ -33,7 +40,14 @@ class AgentGroup(RuntimeRecord):
 class AgentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
-    instructions: str = Field(min_length=1, max_length=4000)
+    instructions: str = Field(default="", max_length=4000)
+    shape: str = "blob"
+    color: str = _DEFAULT_COLOR
+
+    def appearance(self) -> AgentDraft:
+        if self.shape not in AVATAR_SHAPES or self.color.lower() not in AVATAR_COLORS:
+            raise ValueError("Choose an avatar shape and color")
+        return self
 
 
 class GroupDraft(BaseModel):
@@ -91,6 +105,17 @@ def agent_profile_for_turn(session_metadata: dict[str, Any], message_metadata: d
     )
 
 
+def _updated_at(row: dict[str, object]) -> int:
+    value = row.get("updated_at")
+    return value if isinstance(value, int) else 0
+
+
+def _routine_item(row: dict[str, str]) -> dict[str, object]:
+    return {"kind": "routine", "id": row.get("id") or "routine", "title": row.get("name") or "Routine",
+            "subtitle": row.get("subtitle") or "", "updated_at": None, "session_key": None,
+            "shape": "spark", "color": "#eab308"}
+
+
 def _agent_name(agent_id: str) -> str:
     try:
         return RecordStore("kili_agents", KiliAgent).get(agent_id).name
@@ -110,10 +135,42 @@ class AgentRoster:
             "groups": [self._group_view(group) for group in self.groups.list()],
         }
 
+    def home_feed(self, query: str = "", kind: str = "all", routines: list[dict[str, str]] | None = None) -> dict[str, object]:
+        """One list for the home screen. Filters match the search menu exactly."""
+        if kind not in HOME_FILTERS:
+            raise ValueError("Unknown home filter")
+        needle = query.strip().casefold()
+        bots = [self._home_item("bot", agent) for agent in self.agents.list()]
+        groups = [self._home_item("group", group) for group in self.groups.list()]
+        files = self._file_items()
+        routine_items = [_routine_item(row) for row in routines or []]
+        if kind == "bots":
+            rows = bots
+        elif kind == "groups":
+            rows = groups
+        elif kind == "files":
+            rows = files
+        elif kind == "routines":
+            rows = routine_items
+        elif kind == "messages":
+            rows = [*bots, *groups]
+        else:
+            rows = [*bots, *groups]
+            if needle:
+                rows.extend(files)
+                rows.extend(routine_items)
+        if needle:
+            rows = [row for row in rows if needle in str(row["title"]).casefold() or needle in str(row["subtitle"]).casefold()]
+        rows.sort(key=_updated_at, reverse=True)
+        return {"items": rows, "filters": list(HOME_FILTERS)}
+
     def create_agent(self, draft: AgentDraft) -> dict[str, object]:
+        draft.appearance()
         identity = uuid.uuid4().hex
-        agent = KiliAgent(id=f"agent_{identity}", name=draft.name.strip(), instructions=draft.instructions.strip(),
-                          session_key=f"websocket:agent_{identity}", created_at=now_ms(), updated_at=now_ms())
+        focus = draft.instructions.strip() or _DEFAULT_FOCUS
+        agent = KiliAgent(id=f"agent_{identity}", name=draft.name.strip(), instructions=focus,
+                          session_key=f"websocket:agent_{identity}", shape=draft.shape, color=draft.color.lower(),
+                          created_at=now_ms(), updated_at=now_ms())
         session = self.sessions.get_or_create(agent.session_key)
         session.metadata["title"] = agent.name
         session.metadata["kili_agent_id"] = agent.id
@@ -183,9 +240,57 @@ class AgentRoster:
         ))
         return f"Handed to {target.name}. Their reply uses their own instructions and does not inherit your mandates."
 
+    def _preview(self, session_key: str) -> tuple[str, int | None]:
+        session = self.sessions.get_existing(session_key)
+        if session is None:
+            return "", None
+        updated = int(session.updated_at.timestamp() * 1000)
+        preview = ""
+        for message in reversed(session.messages[-40:]):
+            if message.get("_hidden_history") is True:
+                continue
+            content = message.get("content")
+            if message.get("role") in {"user", "assistant"} and isinstance(content, str) and content.strip():
+                preview = " ".join(content.split())[:160]
+                break
+        return preview, updated
+
+    def _home_item(self, kind: str, record: KiliAgent | AgentGroup) -> dict[str, object]:
+        preview, updated = self._preview(record.session_key)
+        if isinstance(record, KiliAgent):
+            shape, color = record.shape or "blob", record.color or _DEFAULT_COLOR
+        else:
+            first = self.agents.get(record.member_ids[0]) if record.member_ids else None
+            shape, color = "square", (first.color if first and first.color else "#22c55e")
+        return {"kind": kind, "id": record.id, "title": record.name, "subtitle": preview,
+                "updated_at": updated, "session_key": record.session_key, "shape": shape, "color": color}
+
+    def _file_items(self) -> list[dict[str, object]]:
+        found: list[dict[str, object]] = []
+        seen: set[str] = set()
+        records: list[KiliAgent | AgentGroup] = [*self.agents.list(), *self.groups.list()]
+        for record in records:
+            session = self.sessions.get_existing(record.session_key)
+            if session is None:
+                continue
+            for message in session.messages[-40:]:
+                content = message.get("content")
+                if not isinstance(content, str):
+                    continue
+                for name in _FILE.findall(content):
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    found.append({"kind": "file", "id": f"file_{name}", "title": name, "subtitle": record.name,
+                                  "updated_at": int(session.updated_at.timestamp() * 1000),
+                                  "session_key": record.session_key, "shape": "square", "color": "#6b7280"})
+        return found
+
     def _agent_view(self, agent: KiliAgent) -> dict[str, object]:
+        preview, updated = self._preview(agent.session_key)
         return {"id": agent.id, "name": agent.name, "instructions": agent.instructions,
-                "session_key": agent.session_key, "color": agent.color}
+                "session_key": agent.session_key, "shape": agent.shape or "blob",
+                "color": agent.color or _DEFAULT_COLOR, "subtitle": preview, "updated_at": updated}
 
     def _group_view(self, group: AgentGroup) -> dict[str, object]:
         return {"id": group.id, "name": group.name, "session_key": group.session_key,

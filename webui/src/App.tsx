@@ -147,7 +147,7 @@ type ShellRoute = {
   temporary?: boolean;
 };
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
-const AgentRoster = lazy(() => import("@/components/AgentRoster").then(module => ({ default: module.AgentRoster })));
+const KiliHome = lazy(() => import("@/components/KiliHome").then(module => ({ default: module.KiliHome })));
 const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
@@ -2859,7 +2859,6 @@ function Shell({
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onExpand={openHostSidebar}
-                  agentRoster={<Suspense fallback={null}><AgentRoster onOpen={sidebarProps.onSelect} /></Suspense>}
                 />
               </div>
               <SidebarResizeHandle
@@ -2897,7 +2896,6 @@ function Shell({
                   {...sidebarProps}
                   onCollapse={closeMobileSidebar}
                   containActionMenus
-                  agentRoster={<Suspense fallback={null}><AgentRoster onOpen={sidebarProps.onSelect} /></Suspense>}
                 />
               </SheetContent>
             </Sheet>
@@ -2931,6 +2929,9 @@ function Shell({
                 view !== "chat" && "hidden",
               )}
             >
+              {view === "chat" && !activeKey && !temporaryChatActive ? (
+                <Suspense fallback={null}><KiliHome onOpenSession={onSelectChat} onOpenSettings={onOpenSettings} /></Suspense>
+              ) : null}
               <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
                 <Suspense fallback={<StartupShell embedded />}>
                   <PaneWorkbench

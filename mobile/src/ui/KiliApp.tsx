@@ -13,12 +13,14 @@ import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 
+import { homeItem, type HomeItem, type SearchFilter } from "../home/feed";
 import { directionFor, localeFromDevice, translate, type CopyKey, type Locale } from "../i18n";
 import { KiliClient, pairGateway } from "../kili/client";
 import { approvalIdFromText, approvalPreview, emptyThread, reduceThread, type KiliSession } from "../kili/protocol";
 import { clearCredentials, loadCredentials, saveCredentials, type SecretStore } from "../kili/session";
+import { CreateBotScreen, CreateGroupScreen, HomeList, SearchScreen, SettingsSheet } from "./HomeScreens";
 
-type Tab = "chats" | "trading" | "settings";
+type Screen = "home" | "createBot" | "createGroup" | "search" | "settings" | "thread" | "trading" | "pair";
 
 const theme = {
   bg: "#141414",
@@ -36,7 +38,7 @@ function Ltr({ children }: { children: string }) {
 
 export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLocale: string | null }) {
   const [locale, setLocale] = useState<Locale>(() => localeFromDevice(deviceLocale, null));
-  const [tab, setTab] = useState<Tab>("chats");
+  const [screen, setScreen] = useState<Screen>("home");
   const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:8765");
   const [secret, setSecret] = useState("");
   const [token, setToken] = useState<string | null>(null);
@@ -51,7 +53,18 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
   const [charts, setCharts] = useState<Record<string, unknown>[]>([]);
   const [candles, setCandles] = useState<Record<string, unknown>[]>([]);
   const [approval, setApproval] = useState<Record<string, unknown> | null>(null);
-  const [agents, setAgents] = useState<Array<Record<string, unknown>>>([]);
+  const [items, setItems] = useState<HomeItem[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [botName, setBotName] = useState("");
+  const [focus, setFocus] = useState("");
+  const [shape, setShape] = useState("hexagon");
+  const [avatarColor, setAvatarColor] = useState("#ec4899");
+  const [groupName, setGroupName] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SearchFilter>("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [notificationsOn, setNotificationsOn] = useState(true);
   const [sheet, setSheet] = useState<"timeframes" | "drawings" | null>(null);
   const direction = directionFor(locale);
   const t = (key: CopyKey) => translate(locale, key);
@@ -67,6 +80,16 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
       setToken(saved.token);
     });
   }, [store]);
+
+  useEffect(() => {
+    if (!client) return;
+    void client.home().then(rows => {
+      setItems(rows.flatMap(row => {
+        const item = homeItem(row);
+        return item ? [item] : [];
+      }));
+    }).catch(() => setError(translate(locale, "offline")));
+  }, [client, locale]);
 
   useEffect(() => {
     if (!client || !active) return;
@@ -106,6 +129,7 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
     try {
       const paired = await pairGateway(baseUrl, secret);
       setToken(paired.token);
+      setScreen("home");
       await saveCredentials(store, { baseUrl, secret, token: paired.token });
       const next = new KiliClient({ baseUrl, token: paired.token, wsPath: paired.wsPath });
       setSessions(await next.sessions());
@@ -170,6 +194,49 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
     setApproval(null);
   }
 
+  async function reloadHome(nextQuery = query, nextFilter: SearchFilter = filter) {
+    if (!client) return;
+    const rows = await client.home(nextQuery, nextFilter);
+    setItems(rows.flatMap(row => {
+      const item = homeItem(row);
+      return item ? [item] : [];
+    }));
+  }
+
+  function openItem(item: HomeItem) {
+    if (!item.sessionKey) {
+      setScreen("trading");
+      void refreshTrading();
+      return;
+    }
+    setActive({
+      key: item.sessionKey,
+      chatId: item.sessionKey.replace(/^websocket:/, ""),
+      title: item.title,
+      updatedAt: item.updatedAt,
+    });
+    setScreen("thread");
+  }
+
+  async function saveBot() {
+    if (!client || !botName.trim()) return;
+    await client.mutate("agents.create", { name: botName.trim(), instructions: focus.trim(), shape, color: avatarColor });
+    setBotName("");
+    setFocus("");
+    setScreen("home");
+    setMenuOpen(false);
+    await reloadHome("", "all");
+  }
+
+  async function saveGroup() {
+    if (!client || memberIds.length < 2 || !groupName.trim()) return;
+    await client.mutate("agents.group", { name: groupName.trim(), member_ids: memberIds });
+    setGroupName("");
+    setMemberIds([]);
+    setScreen("home");
+    await reloadHome("", "all");
+  }
+
   const preview = approvalPreview(
     approval && typeof approval.action === "object" && approval.action
       ? approval.action as Record<string, unknown>
@@ -178,23 +245,67 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
 
   return (
     <View style={[styles.app, { direction }]}>
-      {token && tab === "chats" && !active && (
-        <ScrollView contentContainerStyle={styles.pad}>
-          <Text style={styles.title}>{t("chats")}</Text>
-          {sessions.length === 0 ? <Text style={styles.muted}>{t("emptyChats")}</Text> : null}
-          {sessions.map((session) => (
-            <Pressable key={session.key} style={styles.card} onPress={() => setActive(session)}>
-              <Text style={styles.cardTitle}>{session.title}</Text>
-            </Pressable>
-          ))}
-          <Pressable style={styles.primary} onPress={() => void connect()}>
-            <Text style={styles.primaryText}>{t("newChat")}</Text>
-          </Pressable>
-        </ScrollView>
+      {token && screen === "home" && (
+        <HomeList
+          items={items.filter(item => item.kind === "bot" || item.kind === "group")}
+          now={Date.now()}
+          locale={locale}
+          menuOpen={menuOpen}
+          onOpen={openItem}
+          onSearch={() => { setScreen("search"); void reloadHome(query, filter); }}
+          onMenu={() => setMenuOpen(open => !open)}
+          onAccount={() => setScreen("settings")}
+          onNewBot={() => { setMenuOpen(false); setScreen("createBot"); }}
+          onNewGroup={() => { setMenuOpen(false); setScreen("createGroup"); }}
+          t={t}
+        />
       )}
-      {token && active && tab === "chats" && (
+      {token && screen === "createBot" && (
+        <CreateBotScreen
+          name={botName} focus={focus} shape={shape} color={avatarColor} busy={false}
+          onName={setBotName} onFocus={setFocus} onShape={setShape} onColor={setAvatarColor}
+          onCreate={() => void saveBot()} onClose={() => setScreen("home")} t={t}
+        />
+      )}
+      {token && screen === "createGroup" && (
+        <CreateGroupScreen
+          name={groupName}
+          members={items.filter(item => item.kind === "bot")}
+          selected={memberIds}
+          onName={setGroupName}
+          onToggle={id => setMemberIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])}
+          onCreate={() => void saveGroup()}
+          onClose={() => setScreen("home")}
+          t={t}
+        />
+      )}
+      {token && screen === "search" && (
+        <SearchScreen
+          query={query} filter={filter} filtersOpen={filtersOpen} items={items} now={Date.now()} locale={locale}
+          onQuery={value => { setQuery(value); void reloadHome(value, filter); }}
+          onFilter={value => { setFilter(value); setFiltersOpen(false); void reloadHome(query, value); }}
+          onToggleFilters={() => setFiltersOpen(open => !open)}
+          onOpen={openItem}
+          onClose={() => setScreen("home")}
+          t={t}
+        />
+      )}
+      {token && screen === "settings" && (
+        <SettingsSheet
+          timezone={Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}
+          notifications={notificationsOn}
+          onNotifications={() => setNotificationsOn(on => !on)}
+          onConnections={() => { setScreen("trading"); void refreshTrading(); }}
+          onAppearance={() => setScreen("home")}
+          onLanguage={() => setLocale(locale === "ar" ? "en" : "ar")}
+          onLogout={() => { setToken(null); setScreen("pair"); void clearCredentials(store); }}
+          onClose={() => setScreen("home")}
+          t={t}
+        />
+      )}
+      {token && screen === "thread" && active && (
         <View style={styles.thread}>
-          <Pressable onPress={() => setActive(null)}><Text style={styles.link}>{t("chats")}</Text></Pressable>
+          <Pressable onPress={() => { setActive(null); setScreen("home"); }}><Text style={styles.link}>{t("chats")}</Text></Pressable>
           <Text style={styles.status}>{status === "reconnecting" ? t("reconnecting") : status === "closed" ? t("offline") : activity ?? t("activity")}</Text>
           {error ? <Text style={styles.error}>{error === "offline" ? t("offline") : error}</Text> : null}
           <ScrollView style={styles.history}><Text style={styles.body}>{threadText || t("emptyChats")}</Text></ScrollView>
@@ -217,8 +328,9 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
           </View>
         </View>
       )}
-      {token && tab === "trading" && (
+      {token && screen === "trading" && (
         <ScrollView contentContainerStyle={styles.pad}>
+          <Pressable onPress={() => setScreen("settings")}><Text style={styles.link}>{t("settings")}</Text></Pressable>
           <Text style={styles.title}>{t("trading")}</Text>
           <Pressable style={styles.secondary} onPress={() => void refreshTrading()}><Text style={styles.secondaryText}>{t("openChart")}</Text></Pressable>
           {charts.length === 0 ? <Text style={styles.muted}>{t("emptyChart")}</Text> : charts.map((chart) => (
@@ -277,7 +389,7 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
           ))}
         </ScrollView>
       )}
-      {(!token || tab === "settings") && (
+      {(!token || screen === "pair") && (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.title}>{t("settings")}</Text>
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -291,31 +403,11 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
             <Pressable style={styles.secondary} onPress={() => setLocale("en")}><Text style={styles.secondaryText}>English</Text></Pressable>
             <Pressable style={styles.secondary} onPress={() => setLocale("ar")}><Text style={styles.secondaryText}>العربية</Text></Pressable>
           </View>
-          <Text style={styles.muted}>{t("agents")}</Text>
-          {agents.map(agent => (
-            <Pressable key={String(agent.id)} style={styles.card} onPress={() => {
-              const key = String(agent.session_key);
-              setTab("chats");
-              setActive({ key, chatId: key.replace(/^websocket:/, ""), title: String(agent.name), updatedAt: null });
-            }}>
-              <Text style={styles.cardTitle}>{String(agent.name)}</Text>
-            </Pressable>
-          ))}
-          <Pressable style={styles.secondary} onPress={() => void client?.agents().then(roster => setAgents(roster.agents)).catch(reason => setError(reason instanceof Error ? reason.message : "offline"))}>
-            <Text style={styles.secondaryText}>{t("createAgent")}</Text>
-          </Pressable>
-          <Pressable style={styles.secondary} onPress={() => { setToken(null); void clearCredentials(store); }}>
+          <Pressable style={styles.secondary} onPress={() => { setToken(null); setScreen("pair"); void clearCredentials(store); }}>
             <Text style={styles.secondaryText}>{t("logout")}</Text>
           </Pressable>
         </ScrollView>
       )}
-      <View style={styles.tabs}>
-        {(["chats", "trading", "settings"] as const).map((item) => (
-          <Pressable key={item} style={styles.tab} onPress={() => { setTab(item); if (item === "trading") void refreshTrading(); }}>
-            <Text style={item === tab ? styles.tabOn : styles.tabOff}>{t(item)}</Text>
-          </Pressable>
-        ))}
-      </View>
       {status === "connecting" ? <ActivityIndicator color={theme.text} /> : null}
     </View>
   );
