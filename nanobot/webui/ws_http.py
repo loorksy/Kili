@@ -608,6 +608,8 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
+        if got in {"/downloads/kili.apk", "/api/mobile/release", "/api/mobile/bundle", "/api/mobile/updates"}:
+            return self._handle_mobile_release(request, got)
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
         # Token issue endpoint
@@ -1495,6 +1497,41 @@ class GatewayHTTPHandler:
         )
 
     # -- Automation routes --------------------------------------------------
+
+    def _handle_mobile_release(self, request: WsRequest, got: str) -> Response:
+        from nanobot.webui.mobile_release import (
+            APK_NAME,
+            BUNDLE_NAME,
+            expo_update_body,
+            read_release,
+            release_root,
+        )
+        root = release_root()
+        release = read_release(root)
+        if got == "/api/mobile/release":
+            return _http_json_response(release, extra_headers=_NO_STORE_HEADERS)
+        if got == "/downloads/kili.apk":
+            apk = root / APK_NAME
+            if not apk.is_file():
+                return _http_response(b"The Android app has not been published yet.\n", status=404, content_type="text/plain; charset=utf-8")
+            return _http_response(apk.read_bytes(), content_type="application/vnd.android.package-archive", extra_headers=[
+                ("Content-Disposition", 'attachment; filename="kili.apk"'),
+                ("Cache-Control", "no-cache"),
+            ])
+        bundle_path = root / BUNDLE_NAME
+        if got == "/api/mobile/bundle":
+            if not bundle_path.is_file():
+                return _http_error(404, "Interface bundle is not published")
+            return _http_response(bundle_path.read_bytes(), content_type="application/javascript; charset=utf-8", extra_headers=_NO_STORE_HEADERS)
+        host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "127.0.0.1").split(",")[0].strip()
+        proto = (request.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
+        if not bundle_path.is_file():
+            return _http_response(b"", status=204, content_type="text/plain")
+        status, body, content_type = expo_update_body(
+            release, bundle_path.read_bytes(), f"{proto}://{host}/api/mobile/bundle",
+            request.headers.get("expo-current-update-id"),
+        )
+        return _http_response(body, status=status, content_type=content_type, extra_headers=_NO_STORE_HEADERS)
 
     def _home_routines(self) -> list[dict[str, str]]:
         from nanobot.webui.session_automations import all_automations_payload

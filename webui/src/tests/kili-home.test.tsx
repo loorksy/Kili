@@ -27,6 +27,7 @@ describe("Kili home", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByText(/No per-bot computer/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Download the app" })).toHaveAttribute("href", "/downloads/kili.apk");
     expect(screen.getByText("Broker, charts, mandates, and approvals")).toBeVisible();
   });
 

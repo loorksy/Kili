@@ -15,6 +15,7 @@ import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances, useRemoteConnections } from "@/components/remote/RemoteInstances";
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { DownloadAppLink } from "@/components/DownloadAppLink";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
@@ -495,6 +496,7 @@ function AuthForm({
               </p>
             ) : null}
           </form>
+          <DownloadAppLink className="mt-6 flex min-h-11 items-center justify-center rounded-full bg-foreground px-4 text-sm font-medium text-background" />
           <Disclosure
             className="mt-4"
             summaryClassName="flex min-h-11 items-center justify-center gap-1.5 rounded-compact text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

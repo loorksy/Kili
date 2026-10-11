@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useClient } from "@/providers/ClientProvider";
 import { createKiliAgent, createKiliGroup, fetchHome, type HomeFeedItem } from "@/lib/api";
+import { DownloadAppLink } from "@/components/DownloadAppLink";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 
 const SHAPES = ["blob", "pebble", "square", "spark", "flower", "heart", "drop", "oval", "triangle", "gem", "hexagon"] as const;
@@ -178,6 +179,7 @@ export function KiliHome({ onOpenSession, onOpenSettings }: {
       <section className="rounded-2xl bg-muted p-4"><h2 className="font-medium">{text.timezone}</h2><p className="text-sm text-muted-foreground" dir="ltr">{Intl.DateTimeFormat().resolvedOptions().timeZone}</p></section>
       <button type="button" className="rounded-2xl bg-muted p-4 text-start" onClick={() => setNotifications(on => !on)}><span className="font-medium">{text.notifications}</span><span className="ms-2 text-sm text-muted-foreground">{notifications ? "On" : "Off"}</span></button>
       <button type="button" className="rounded-2xl bg-muted p-4 text-start" onClick={() => onOpenSettings("appearance")}><span className="font-medium">{text.appearance}</span><span className="ms-2 text-sm text-muted-foreground">{text.appearanceBody}</span></button>
+      <DownloadAppLink className="flex min-h-11 items-center justify-center rounded-full bg-foreground px-4 text-sm font-medium text-background" />
     </div>}
   </div>;
 }

@@ -97,4 +97,6 @@ Stopping Rakazo after this must leave Kili's env file, secret file, and config i
 
 Approvals and mandates use the Approve and Deny buttons in the WebUI and mobile app. Those buttons send the exact stored action fingerprint to an owner-only endpoint. `/approve` remains a hidden fallback, and the agent is instructed not to ask for it.
 
+The Android app is downloaded from `https://kili.lork.cloud/downloads/kili.apk`. Publishing the APK and interface updates is described in `docs/mobile-releases.md`.
+
 The sidebar can create persistent agents and group chats. Each agent has its own conversation and instructions. A group handoff does not copy an approval card or transfer a mandate. There is no per-agent computer or browser sandbox.

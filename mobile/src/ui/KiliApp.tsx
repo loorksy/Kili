@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 
 import { homeItem, type HomeItem, type SearchFilter } from "../home/feed";
+import { apkUrl, updateAction, type PublishedRelease } from "../home/updates";
+import releaseInfo from "../../release.json";
 import { directionFor, localeFromDevice, translate, type CopyKey, type Locale } from "../i18n";
 import { KiliClient, pairGateway } from "../kili/client";
 import { approvalIdFromText, approvalPreview, emptyThread, reduceThread, type KiliSession } from "../kili/protocol";
@@ -65,6 +68,7 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
   const [filter, setFilter] = useState<SearchFilter>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [notificationsOn, setNotificationsOn] = useState(true);
+  const [update, setUpdate] = useState<{ kind: "apk" | "bundle"; url: string } | null>(null);
   const [sheet, setSheet] = useState<"timeframes" | "drawings" | null>(null);
   const direction = directionFor(locale);
   const t = (key: CopyKey) => translate(locale, key);
@@ -90,6 +94,25 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
       }));
     }).catch(() => setError(translate(locale, "offline")));
   }, [client, locale]);
+
+  useEffect(() => {
+    const origin = baseUrl.replace(/\/$/, "");
+    let active = true;
+    void fetch(`${origin}/api/mobile/release`).then(async response => {
+      if (!response.ok || !active) return;
+      const body = await response.json() as PublishedRelease;
+      const action = updateAction(releaseInfo.versionCode, releaseInfo.bundleRevision, body);
+      if (action === "apk") {
+        const url = apkUrl(origin, body);
+        if (url && active) setUpdate({ kind: "apk", url });
+      } else if (action === "bundle") {
+        const { applyBundleUpdate } = await import("../home/updates");
+        const applied = await applyBundleUpdate();
+        if (!applied && active) setUpdate({ kind: "bundle", url: "" });
+      }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [baseUrl]);
 
   useEffect(() => {
     if (!client || !active) return;
@@ -245,6 +268,11 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
 
   return (
     <View style={[styles.app, { direction }]}>
+      {token && update && (
+        <Pressable style={styles.card} onPress={() => { if (update.url) void Linking.openURL(update.url); }}>
+          <Text style={styles.cardTitle}>{update.kind === "apk" ? t("installUpdate") : t("updateReady")}</Text>
+        </Pressable>
+      )}
       {token && screen === "home" && (
         <HomeList
           items={items.filter(item => item.kind === "bot" || item.kind === "group")}
