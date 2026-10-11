@@ -1,7 +1,6 @@
 """Explicit market conditions attached to the existing durable responsibility."""
 from __future__ import annotations
 
-import hashlib
 import uuid
 from typing import Any, Literal
 
@@ -9,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext, current_request_context
-from nanobot.market.watchers import MarketWatcher
+from nanobot.market.watchers import MarketWatcher, watcher_namespace
 from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore
 
@@ -32,8 +31,7 @@ class MarketWatchTool(Tool):
     def __init__(self, ctx: ToolContext):
         from nanobot.trading.accounts import TradingAccounts
         self.accounts = TradingAccounts(ctx.config.integrations)
-        namespace = hashlib.sha256(ctx.workspace.encode()).hexdigest()
-        self.records = RecordStore("market_watchers:" + namespace, MarketWatcher)
+        self.records = RecordStore(watcher_namespace(ctx.workspace), MarketWatcher)
         self.cron = ctx.cron_service
 
     @property
@@ -90,7 +88,12 @@ class MarketWatchTool(Tool):
             watcher = self.records.get(request.watcher_id)
             if watcher.responsibility_id != request.responsibility_id:
                 raise PermissionError("Condition belongs to another responsibility")
+            if watcher.lifecycle in {"CANCELLED", "FIRED"}:
+                return watcher.model_dump_json()
+            watcher.lifecycle = "CANCELLED"
             watcher.active = False
+            watcher.fired = False
+            watcher.stop_reason = "model_cancel"
             self.records.save(watcher)
         if self.cron:
             self.cron.reschedule()
