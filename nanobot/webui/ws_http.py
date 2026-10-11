@@ -1020,10 +1020,10 @@ class GatewayHTTPHandler:
             elif path.endswith("/resolve"):
                 if payload is None:
                     return _http_error(405, "Approval requires authenticated WebSocket")
-                approval_id, approve = payload.get("approval_id"), payload.get("approve")
-                if not isinstance(approval_id, str) or not isinstance(approve, bool):
+                approval_id, approve, fingerprint = payload.get("approval_id"), payload.get("approve"), payload.get("fingerprint")
+                if not isinstance(approval_id, str) or not isinstance(approve, bool) or not isinstance(fingerprint, str):
                     return _http_error(400, "Invalid approval resolution")
-                result = resolve_approval(principal, approval_id, approve)
+                result = resolve_approval(principal, approval_id, approve, fingerprint)
                 from nanobot.session.action_turns import queue_approval_resolutions
                 queue_approval_resolutions(self.session_manager.responsibilities)
             elif path == "/api/webui/action-approvals":

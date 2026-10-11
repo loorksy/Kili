@@ -158,10 +158,13 @@ export function KiliApp({ store, deviceLocale }: { store: SecretStore; deviceLoc
 
   async function resolveApproval(approve: boolean) {
     if (!client || !active || !approval || typeof approval.id !== "string") return;
+    const fingerprint = typeof approval.fingerprint === "string" ? approval.fingerprint : "";
+    if (!fingerprint) return;
     await client.mutate("approval.resolve", {
       session_key: active.key,
       approval_id: approval.id,
       approve,
+      fingerprint,
     });
     setApproval(null);
   }

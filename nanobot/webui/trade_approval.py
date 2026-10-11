@@ -52,4 +52,4 @@ async def edit_approval(config: Config, principal: str, approval_id: str, volume
     action = Action(tool="trade_execute", action_class="consequential", principal=principal,
         responsibility_id=original.responsibility_id, parameters=preview.material_action())
     fresh = journal.replace_pending(str(record["id"]), principal=principal, action=action)
-    return {"id": fresh.id, "status": fresh.status, "action": fresh.action.parameters}
+    return {"id": fresh.id, "status": fresh.status, "fingerprint": fresh.fingerprint, "action": fresh.action.parameters}

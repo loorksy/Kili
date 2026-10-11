@@ -35,7 +35,13 @@ async def test_chat_edit_revokes_old_terms_and_reopens_new_pending_terms(client,
     with pytest.raises(ValueError, match="pending"):
         journal.resolve(old.id, principal="websocket:main", approve=True)
     # Reloading the original chat card restores the new exact preview.
-    assert ActionStore().read_approval(old.id, "websocket:main") == result
+    current = ActionStore().read_approval(old.id, "websocket:main")
+    assert current["id"] == result["id"]
+    assert current["fingerprint"] == result["fingerprint"]
+    assert current["action"] == result["action"]
+    assert "/approve" not in str(current["card"])
+    with pytest.raises(PermissionError, match="fingerprint"):
+        journal.resolve(str(result["id"]), principal="websocket:main", approve=True, fingerprint="0" * 64)
     assert journal.list_effects() == []
 
 

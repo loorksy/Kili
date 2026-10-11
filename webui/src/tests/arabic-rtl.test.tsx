@@ -44,6 +44,12 @@ describe("Arabic and RTL", () => {
     mocks.read.mockResolvedValue({
       id,
       status: "PENDING",
+      fingerprint: "c".repeat(64),
+      card: {
+        instrument: "XAUUSD", side: "buy", volume: "0.10", entry: "82,950.34",
+        stop_loss: "82,100", take_profit: "84,200", risk: null, account: "acct-1",
+        mode: "DEMO", expires_at: 1, fingerprint: "c".repeat(64),
+      },
       action: {
         account_id: "acct-1",
         broker_symbol: "XAUUSD",
@@ -63,11 +69,11 @@ describe("Arabic and RTL", () => {
     expect(await screen.findByRole("button", { name: "موافقة" })).toBeVisible();
     expect(screen.getByRole("button", { name: "رفض" })).toBeVisible();
     expect(screen.getByText("طلب شراء")).toBeVisible();
-    const symbol = screen.getByText("XAUUSD");
+    const symbol = screen.getAllByText("XAUUSD")[0];
     expect(symbol.closest("bdi")).toHaveAttribute("dir", "ltr");
-    const price = screen.getByText("82,950.34");
+    const price = screen.getAllByText("82,950.34")[0];
     expect(price.closest("bdi")).toHaveAttribute("dir", "ltr");
-    expect(screen.getByText("acct-1").closest("bdi")).toHaveAttribute("dir", "ltr");
+    expect(screen.getAllByText("acct-1")[0].closest("bdi")).toHaveAttribute("dir", "ltr");
   });
 
   it("renders an explicit LTR island", () => {
@@ -85,6 +91,7 @@ describe("narrow approval layout", () => {
     mocks.read.mockResolvedValue({
       id,
       status: "PENDING",
+      fingerprint: "d".repeat(64),
       action: { broker_symbol: "EURUSD", account_id: "demo", intent: { operation: "open", side: "sell", volume: "1" } },
     });
     render(<ActionApproval reference={reference} />);

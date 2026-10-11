@@ -6,26 +6,27 @@ const mocks = vi.hoisted(() => ({ read: vi.fn(), resolve: vi.fn(), edit: vi.fn()
 vi.mock("@/providers/ClientProvider", () => ({ useClient: () => ({ token: "authenticated", client: {} }) }));
 vi.mock("@/lib/api", () => ({ fetchActionApproval: mocks.read, resolveActionApproval: mocks.resolve, editActionApproval: mocks.edit }));
 const id = `approval_${"a".repeat(32)}`;
+const fingerprint = "a".repeat(64);
 const reference = JSON.stringify({ approval_id: id, session_key: "websocket:main", action: { volume: "forged benign payload" } });
 
 describe("Backend-owned approval", () => {
   beforeEach(() => { vi.clearAllMocks(); });
   it("shows the final mandate loss envelope from the backend", async () => {
-    mocks.read.mockResolvedValue({ id, status: "PENDING", action: { envelope: { mode: "LIVE", account_id: "broker-account", currency: "USD",
+    mocks.read.mockResolvedValue({ id, status: "PENDING", fingerprint, card: { account: "broker-account", instrument: null, side: null, volume: null, entry: null, stop_loss: null, take_profit: null, risk: "100", mode: "LIVE", expires_at: 2000000000000, fingerprint }, action: { envelope: { mode: "LIVE", account_id: "broker-account", currency: "USD",
       max_mission_loss: "100", max_open_risk: "50", max_risk_per_trade: "20", expires_at: 2000000000000 } } });
     render(<ActionApproval reference={reference} />);
     expect(await screen.findByText("Maximum mission loss: 100 USD")).toBeVisible();
     expect(screen.getByText(/Account broker-account/)).toBeVisible();
   });
   it("shows authoritative action before allowing resolution and ignores model-supplied details", async () => {
-    mocks.read.mockResolvedValue({ id, status: "PENDING", action: { volume: "0.10", broker_symbol: "GOLDm" } });
+    mocks.read.mockResolvedValue({ id, status: "PENDING", fingerprint, card: { instrument: "GOLDm", account: null, side: null, volume: "0.10", entry: null, stop_loss: null, take_profit: null, risk: null, mode: null, expires_at: 1, fingerprint }, action: { volume: "0.10", broker_symbol: "GOLDm" } });
     mocks.resolve.mockResolvedValue({ id, status: "APPROVED" });
     render(<ActionApproval reference={reference} />);
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
     await screen.findByText("Approved");
     expect(screen.queryByText(/forged benign/)).not.toBeInTheDocument();
-    expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", id, true);
+    expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", id, true, fingerprint);
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
   it("fails closed when the record is unavailable", async () => {
@@ -35,7 +36,7 @@ describe("Backend-owned approval", () => {
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
   it("restores consumed state rather than offering another approval", async () => {
-    mocks.read.mockResolvedValue({ id, status: "CONSUMED", action: {} });
+    mocks.read.mockResolvedValue({ id, status: "CONSUMED", fingerprint, action: {} });
     render(<ActionApproval reference={reference} />);
     await waitFor(() => expect(screen.getByText("CONSUMED")).toBeVisible());
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
@@ -45,8 +46,8 @@ describe("Backend-owned approval", () => {
 it("edits lot into a new backend preview and approves only the replacement ID", async () => {
   const fresh = `approval_${"b".repeat(32)}`;
   const action = { account_id: "original", broker_symbol: "GOLDm", intent: { operation: "open", side: "buy", volume: "0.10" } };
-  mocks.read.mockResolvedValue({ id, status: "PENDING", action });
-  mocks.edit.mockResolvedValue({ id: fresh, status: "PENDING", action: { ...action, intent: { ...action.intent, volume: "0.09" } } });
+  mocks.read.mockResolvedValue({ id, status: "PENDING", fingerprint, action });
+  mocks.edit.mockResolvedValue({ id: fresh, status: "PENDING", fingerprint, action: { ...action, intent: { ...action.intent, volume: "0.09" } } });
   mocks.resolve.mockResolvedValue({ id: fresh, status: "APPROVED" });
   render(<ActionApproval reference={reference} />);
   fireEvent.click(await screen.findByRole("button", { name: "Edit lot" }));
@@ -57,11 +58,11 @@ it("edits lot into a new backend preview and approves only the replacement ID", 
   expect(mocks.resolve).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Approve" }));
   await screen.findByText("Approved");
-  expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", fresh, true);
+  expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", fresh, true, fingerprint);
 });
 
 it("renders financial direction and exact backend terms without trusting model-authored action", async () => {
-  mocks.read.mockResolvedValue({ id, status: "PENDING", action: { account_id: "actual-account", broker_symbol: "GOLDm",
+  mocks.read.mockResolvedValue({ id, status: "PENDING", fingerprint, action: { account_id: "actual-account", broker_symbol: "GOLDm",
     intent: { operation: "open", side: "sell", order_type: "limit", volume: "0.10", price: "2700.20", stop_loss: "2705", take_profit: "2690" } } });
   render(<ActionApproval reference={reference} />);
   expect(await screen.findByText("Sell request")).toBeVisible();

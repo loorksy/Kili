@@ -131,6 +131,8 @@ async def update_chart(config: Config, sessions: SessionManager, bus: MessageBus
     return await chart_snapshot(config, parsed.chart_id, principal)
 
 
-def resolve_approval(principal: str, approval_id: str, approve: bool) -> dict[str, object]:
-    record = ActionStore().resolve(approval_id, principal=principal, approve=approve)
-    return {"id": record.id, "status": record.status}
+def resolve_approval(principal: str, approval_id: str, approve: bool, fingerprint: str) -> dict[str, object]:
+    if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+        raise PermissionError("Approval requires the exact action fingerprint")
+    record = ActionStore().resolve(approval_id, principal=principal, approve=approve, fingerprint=fingerprint)
+    return {"id": record.id, "status": record.status, "fingerprint": record.fingerprint}

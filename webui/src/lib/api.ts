@@ -1372,11 +1372,13 @@ export function fetchChartCandles(token: string, chartId: string, sessionKey: st
 export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: string, operation: Record<string, unknown>) {
   return mutation<import("@/components/charts/contract").CloudChartState>(transport, "chart.update", { session_key: sessionKey, operation });
 }
-export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean) {
-  return mutation<{ id: string; status: string }>(transport, "approval.resolve", { session_key: sessionKey, approval_id: approvalId, approve });
+export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean, fingerprint: string) {
+  return mutation<{ id: string; status: string; fingerprint: string }>(transport, "approval.resolve", {
+    session_key: sessionKey, approval_id: approvalId, approve, fingerprint,
+  });
 }
 export function editActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, volume: string) {
-  return mutation<{ id: string; status: string; action: Record<string, unknown> }>(transport, "approval.edit", { session_key: sessionKey, approval_id: approvalId, volume });
+  return mutation<{ id: string; status: string; fingerprint: string; action: Record<string, unknown> }>(transport, "approval.edit", { session_key: sessionKey, approval_id: approvalId, volume });
 }
 
 export interface IntegrationStatus {
@@ -1397,9 +1399,22 @@ export function configureInstrumentMapping(transport: WebUIMutationTransport, va
   return mutation<Record<string, unknown>>(transport, "settings.integrations.map", values);
 }
 
+export interface ApprovalCard {
+  instrument: string | null;
+  side: string | null;
+  volume: string | null;
+  entry: string | null;
+  stop_loss: string | null;
+  take_profit: string | null;
+  risk: string | null;
+  account: string | null;
+  mode: string | null;
+  expires_at: number;
+  fingerprint: string;
+}
 export function fetchActionApproval(token: string, sessionKey: string, approvalId: string) {
   const query = new URLSearchParams({ session_key: sessionKey, approval_id: approvalId });
-  return request<{ id: string; status: string; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
+  return request<{ id: string; status: string; fingerprint: string; expires_at: number; card: ApprovalCard; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
 }
 
 export interface TradingMissionState {
@@ -1420,14 +1435,22 @@ export interface TradingMissionState {
   monitoring_summary: string;
   approved: boolean;
   expires_at: number;
+  fingerprint?: string;
+  account_id?: string;
+  max_mission_loss?: string;
+  max_risk_per_trade?: string;
+  instruments?: string[];
 }
 export function fetchTradingMission(token: string, sessionKey: string, mandateId: string) {
   const query = new URLSearchParams({ session_key: sessionKey, mandate_id: mandateId });
   return request<TradingMissionState>(`/api/webui/trading-missions?${query}`, token);
 }
 export function controlTradingMission(transport: WebUIMutationTransport, sessionKey: string, mandateId: string,
-  operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop") {
-  return mutation<TradingMissionState>(transport, "mission.control", { session_key: sessionKey, mandate_id: mandateId, operation });
+  operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop" | "approve" | "deny",
+  fingerprint?: string) {
+  return mutation<TradingMissionState>(transport, "mission.control", {
+    session_key: sessionKey, mandate_id: mandateId, operation, ...(fingerprint ? { fingerprint } : {}),
+  });
 }
 export function configureAutonomousTrading(transport: WebUIMutationTransport, enabled: boolean) {
   return mutation<IntegrationStatus>(transport, "settings.integrations.autonomy", { enabled });

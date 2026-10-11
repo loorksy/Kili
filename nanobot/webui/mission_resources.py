@@ -17,8 +17,9 @@ class MissionControl(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_key: str
     mandate_id: str
-    operation: Literal["activate", "pause", "cancel", "resume", "emergency_stop", "guardrails"]
+    operation: Literal["activate", "pause", "cancel", "resume", "emergency_stop", "guardrails", "approve", "deny"]
     guardrails: AccountGuardrails | None = None
+    fingerprint: str | None = None
 
 
 def service_for(config: Config, mandate_id: str | None = None, principal: str | None = None) -> TradingMissions:
@@ -45,13 +46,37 @@ def mission_snapshot(service: TradingMissions, principal: str, mandate_id: str) 
         "reserved_risk":str(sum(r.risk for r in reservations)),"attention_reason":mandate.attention_reason,
         "plan_version":plan.plan_version,"monitoring_summary":plan.monitoring_summary,
         "approval_id":mandate.approval_id,"approved":mandate.approved_at is not None,
-        "expires_at":mandate.envelope.expires_at}
+        "expires_at":mandate.envelope.expires_at,
+        "fingerprint":service.approval_action(mandate).fingerprint,
+        "account_id":mandate.envelope.account_id,
+        "mode_label":mandate.envelope.mode,
+        "max_mission_loss":str(mandate.envelope.max_mission_loss),
+        "max_risk_per_trade":str(mandate.envelope.max_risk_per_trade),
+        "instruments":list(mandate.envelope.allowed_instruments)}
+
+
+async def authorize_mandate(service: TradingMissions, principal: str, mandate: TradingMandate,
+                           fingerprint: str | None, *, approve: bool) -> None:
+    """Owner button path. A peer message cannot call this."""
+    if not fingerprint:
+        raise PermissionError("Mandate approval requires the exact action fingerprint")
+    action = service.approval_action(mandate)
+    if fingerprint != action.fingerprint:
+        raise PermissionError("Fingerprint does not match this mandate")
+    pending = service.journal.pending_for_fingerprint(fingerprint, principal)
+    service.journal.resolve(pending.id, principal=principal, approve=approve, fingerprint=fingerprint)
+    if approve:
+        await service.activate(principal, mandate.id)
 
 
 async def control_mission(service: TradingMissions, request: MissionControl) -> dict[str, object]:
     mandate = service.mandates.get(request.mandate_id)
     service.owner(request.session_key,mandate)
-    if request.operation == "activate":
+    if request.operation == "approve":
+        await authorize_mandate(service, request.session_key, mandate, request.fingerprint, approve=True)
+    elif request.operation == "deny":
+        await authorize_mandate(service, request.session_key, mandate, request.fingerprint, approve=False)
+    elif request.operation == "activate":
         await service.activate(request.session_key,mandate.id)
     elif request.operation == "guardrails":
         # This adapter is callable only by the authenticated mutation handler,
