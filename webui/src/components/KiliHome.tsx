@@ -133,6 +133,7 @@ export function KiliHome({ onOpenSession, onOpenSettings }: {
           </li>
         ))}
       </ul>
+      <DownloadAppLink className="m-4 flex min-h-11 items-center justify-center rounded-full bg-foreground px-4 text-sm font-medium text-background" />
     </>}
     {panel === "bot" && <form className="flex flex-1 flex-col gap-4 overflow-auto p-4" onSubmit={event => { event.preventDefault(); void createBot(); }}>
       <div className="flex items-center gap-3">

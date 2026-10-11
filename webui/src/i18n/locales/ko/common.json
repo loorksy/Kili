@@ -292,17 +292,17 @@
     "saveError": "네트워크에 문제가 있는 것 같습니다. 이 알림이 다시 표시될 수 있습니다."
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "nanobot에 연결 중…",
-      "boot": "nanobot 불러오는 중…"
+      "connecting": "Kili에 연결 중…",
+      "boot": "Kili 불러오는 중…"
     },
     "error": {
       "title": "nanobot에 연결할 수 없습니다",
       "gatewayHint": "gateway(`nanobot gateway`)가 실행 중이고 이 브라우저에서 WebUI 주소에 접근할 수 있는지 확인하세요."
     },
     "auth": {
-      "title": "nanobot에 연결",
+      "title": "Kili에 연결",
       "label": "WebUI 비밀번호",
       "helpTitle": "비밀번호는 어디에서 찾나요?",
       "helpConfig": "nanobot을 실행 중인 기기에서 설정 파일을 여세요. 일반적으로 다음 위치에 있습니다:",
@@ -332,11 +332,11 @@
       "completed": "{{seconds}}초 만에 다시 시작되었습니다."
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
+      "description": "Kili 웹 UI — Kili 작업공간과 대화하세요."
     },
     "pairing": {
       "title": "내 채팅 계정 페어링",

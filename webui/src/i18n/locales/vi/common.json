@@ -292,17 +292,17 @@
     "saveError": "Có thể đã xảy ra sự cố mạng. Lời nhắc này có thể xuất hiện lại."
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "Đang kết nối tới nanobot…",
-      "boot": "Đang tải nanobot…"
+      "connecting": "Đang kết nối tới Kili…",
+      "boot": "Đang tải Kili…"
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trình duyệt này có thể truy cập địa chỉ WebUI của gateway."
     },
     "auth": {
-      "title": "Kết nối với nanobot",
+      "title": "Kết nối với Kili",
       "label": "Mật khẩu WebUI",
       "helpTitle": "Tìm mật khẩu ở đâu?",
       "helpConfig": "Trên thiết bị đang chạy nanobot, mở tệp cấu hình, thường nằm tại:",
@@ -332,11 +332,11 @@
       "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "Giao diện web nanobot — trò chuyện với không gian làm việc nanobot của bạn."
+      "description": "Giao diện web Kili — trò chuyện với không gian làm việc Kili của bạn."
     },
     "pairing": {
       "title": "Ghép nối tài khoản trò chuyện của bạn",

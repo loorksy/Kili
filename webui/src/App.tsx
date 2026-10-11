@@ -425,7 +425,7 @@ function AuthForm({
         >
           <div className="text-center">
             <img
-              src="/brand/nanobot_mark.svg"
+              src="/brand/kili_mark.svg"
               alt=""
               width={56}
               height={56}

@@ -292,17 +292,17 @@
     "saveError": "There may be a network issue. This reminder may appear again."
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "Connecting to nanobot…",
-      "boot": "Loading nanobot…"
+      "connecting": "Connecting to Kili…",
+      "boot": "Loading Kili…"
     },
     "error": {
       "title": "Couldn't reach nanobot",
       "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and this browser can reach its WebUI address."
     },
     "auth": {
-      "title": "Connect to nanobot",
+      "title": "Connect to Kili",
       "label": "WebUI password",
       "helpTitle": "Where can I find the password?",
       "helpConfig": "On the device running nanobot, open the config file, usually at:",
@@ -332,11 +332,11 @@
       "completed": "Restart completed in {{seconds}}s."
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "nanobot web UI — chat with your nanobot workspace."
+      "description": "Kili web UI — chat with your Kili workspace."
     },
     "pairing": {
       "title": "Pair your chat account",

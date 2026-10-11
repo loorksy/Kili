@@ -292,17 +292,17 @@
     "saveError": "Il y a peut-être un problème de connexion. Ce rappel pourrait réapparaître."
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "Connexion à nanobot…",
-      "boot": "Chargement de nanobot…"
+      "connecting": "Connexion à Kili…",
+      "boot": "Chargement de Kili…"
     },
     "error": {
       "title": "Impossible de joindre nanobot",
       "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que ce navigateur peut atteindre son adresse WebUI."
     },
     "auth": {
-      "title": "Se connecter à nanobot",
+      "title": "Se connecter à Kili",
       "label": "Mot de passe de la WebUI",
       "helpTitle": "Où trouver le mot de passe ?",
       "helpConfig": "Sur l’appareil qui exécute nanobot, ouvrez le fichier de configuration, généralement situé ici :",
@@ -332,11 +332,11 @@
       "completed": "Redémarrage terminé en {{seconds}} s."
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "Interface web nanobot — discutez avec votre espace de travail nanobot."
+      "description": "Interface web Kili — discutez avec votre espace de travail Kili."
     },
     "pairing": {
       "title": "Associer votre compte de messagerie",

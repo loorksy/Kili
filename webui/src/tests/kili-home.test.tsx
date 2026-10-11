@@ -16,6 +16,7 @@ describe("Kili home", () => {
     mocks.home.mockResolvedValue({ items: [], filters: ["all", "messages", "bots", "groups", "files", "routines"] });
     render(<KiliHome onOpenSession={vi.fn()} onOpenSettings={vi.fn()} />);
     expect(await screen.findByText("No bots yet.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Download the app" })).toHaveAttribute("href", "/downloads/kili.apk");
     fireEvent.click(screen.getByRole("button", { name: "+" }));
     expect(screen.getByRole("button", { name: "New Bot" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New Group Chat" })).toBeVisible();

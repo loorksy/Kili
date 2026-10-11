@@ -292,17 +292,17 @@
     "saveError": "网络可能出了点问题，之后可能还会弹出此提醒。"
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "正在连接 nanobot…",
-      "boot": "正在加载 nanobot…"
+      "connecting": "正在连接 Kili…",
+      "boot": "正在加载 Kili…"
     },
     "error": {
       "title": "无法连接到 nanobot",
       "gatewayHint": "请确认网关已启动（`nanobot gateway`），并且当前浏览器可以访问它的 WebUI 地址。"
     },
     "auth": {
-      "title": "连接到 nanobot",
+      "title": "连接到 Kili",
       "label": "WebUI 密码",
       "helpTitle": "在哪里找到密码？",
       "helpConfig": "在运行 nanobot 的设备上打开配置文件，通常位于：",
@@ -332,11 +332,11 @@
       "completed": "重启已完成，用时 {{seconds}} 秒。"
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "nanobot Web UI —— 与你的 nanobot 工作区对话。"
+      "description": "Kili Web UI —— 与你的 Kili 工作区对话。"
     },
     "pairing": {
       "title": "配对你的聊天账号",

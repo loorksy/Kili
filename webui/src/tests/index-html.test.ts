@@ -47,4 +47,25 @@ describe("index.html", () => {
     expect(manifest.color_scheme_dark?.background_color).toBe("#303030");
     expect(manifest.color_scheme_dark?.theme_color).toBe("#303030");
   });
+
+  it("names the installed app Kili", () => {
+    const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
+    const manifest = JSON.parse(
+      readFileSync(resolve(process.cwd(), "public/manifest.json"), "utf8"),
+    ) as { name?: string; short_name?: string; description?: string; icons?: { src: string }[] };
+
+    expect(html).toContain('content="Kili web UI — chat with your Kili workspace."');
+    expect(html).toContain('name="apple-mobile-web-app-title" content="Kili"');
+    expect(html).toContain('href="/brand/kili_mark.svg"');
+    expect(html).toContain('title: "كيلي"');
+    expect(manifest.name).toBe("Kili");
+    expect(manifest.short_name).toBe("Kili");
+    expect(manifest.description).toBe("Kili (كيلي)");
+    expect(manifest.icons?.map((icon) => icon.src)).toEqual([
+      "/brand/kili_apple_touch.png",
+      "/brand/kili_icon_192.png",
+      "/brand/kili_icon_512.png",
+      "/brand/kili_icon_maskable.png",
+    ]);
+  });
 });

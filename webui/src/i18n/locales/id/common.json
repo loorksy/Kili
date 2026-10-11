@@ -292,17 +292,17 @@
     "saveError": "Mungkin ada masalah jaringan. Pengingat ini mungkin muncul lagi."
   },
   "app": {
-    "brand": "nanobot",
+    "brand": "Kili",
     "loading": {
-      "connecting": "Menghubungkan ke nanobot…",
-      "boot": "Memuat nanobot…"
+      "connecting": "Menghubungkan ke Kili…",
+      "boot": "Memuat Kili…"
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",
       "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan browser ini dapat menjangkau alamat WebUI-nya."
     },
     "auth": {
-      "title": "Hubungkan ke nanobot",
+      "title": "Hubungkan ke Kili",
       "label": "Kata sandi WebUI",
       "helpTitle": "Di mana saya bisa menemukan kata sandi?",
       "helpConfig": "Pada perangkat yang menjalankan nanobot, buka file konfigurasi, biasanya di:",
@@ -332,11 +332,11 @@
       "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
     },
     "documentTitle": {
-      "base": "nanobot",
+      "base": "Kili",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "UI web nanobot — ngobrol dengan ruang kerja nanobot Anda."
+      "description": "UI web Kili — ngobrol dengan ruang kerja Kili Anda."
     },
     "pairing": {
       "title": "Pasangkan akun chat Anda",
