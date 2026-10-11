@@ -351,6 +351,16 @@ def _internal_root(tmp_path):
     return fake
 
 
+async def test_acceptance_fixture_watcher_is_cancelled_on_reconcile(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.security.runtime_storage.get_config_path", lambda: tmp_path / "config.json")
+    store, parent, records, client = _stack(tmp_path)
+    records.create(_watcher(parent.id, "watch_vps_accept", provider_instrument="EURUSD",
+                            canonical_instrument="EURUSD", threshold=Decimal("1")))
+    MarketWatchers(client, store, records)
+    assert records.get("watch_vps_accept").lifecycle == "CANCELLED"
+    assert records.get("watch_vps_accept").stop_reason == "acceptance_fixture"
+
+
 def test_pause_from_another_process_updates_shared_watcher_rows(tmp_path, monkeypatch):
     fake_root = _internal_root(tmp_path)
     monkeypatch.setattr("nanobot.session.responsibilities.internal_state_root", fake_root)

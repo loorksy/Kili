@@ -215,6 +215,10 @@ class MarketWatchers:
         parents = {item.id: item for item in self.responsibilities.list()}
         for watcher in self.records.list():
             parent = parents.get(watcher.responsibility_id)
+            if watcher.id == "watch_vps_accept" and watcher.lifecycle not in {"CANCELLED", "FIRED"}:
+                self._cancel(watcher, "acceptance_fixture")
+                self._persist(watcher)
+                continue
             if parent is None:
                 if watcher.lifecycle == "ACTIVE":
                     self._cancel(watcher, "parent_missing")

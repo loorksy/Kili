@@ -10,7 +10,7 @@ Published files live in the data directory, next to `config.json`:
 /opt/kili/data/mobile-release/bundle.js
 ```
 
-The WebUI download button uses `https://kili.lork.cloud/downloads/kili.apk`. The app reads `https://kili.lork.cloud/api/mobile/release` on launch.
+The WebUI download button uses `https://kili.lork.cloud/downloads/kili.apk`. That file is the arm64 debug build in `deploy/mobile-release/kili.apk`. Android will ask once to allow installation. The app reads `https://kili.lork.cloud/api/mobile/release` on launch. `/api/mobile/updates` serves the Hermes bundle in `deploy/mobile-release` when the server data directory does not already have one.
 
 ## Interface update
 

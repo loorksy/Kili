@@ -1501,8 +1501,8 @@ class GatewayHTTPHandler:
     def _handle_mobile_release(self, request: WsRequest, got: str) -> Response:
         from nanobot.webui.mobile_release import (
             APK_NAME,
-            BUNDLE_NAME,
             expo_update_body,
+            published_bundle,
             read_release,
             release_root,
         )
@@ -1518,18 +1518,18 @@ class GatewayHTTPHandler:
                 ("Content-Disposition", 'attachment; filename="kili.apk"'),
                 ("Cache-Control", "no-cache"),
             ])
-        bundle_path = root / BUNDLE_NAME
+        bundle_path = published_bundle(root)
         if got == "/api/mobile/bundle":
-            if not bundle_path.is_file():
+            if bundle_path is None:
                 return _http_error(404, "Interface bundle is not published")
-            return _http_response(bundle_path.read_bytes(), content_type="application/javascript; charset=utf-8", extra_headers=_NO_STORE_HEADERS)
+            return _http_response(bundle_path.read_bytes(), content_type="application/javascript", extra_headers=_NO_STORE_HEADERS)
         host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "127.0.0.1").split(",")[0].strip()
         proto = (request.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
-        if not bundle_path.is_file():
+        if bundle_path is None:
             return _http_response(b"", status=204, content_type="text/plain")
         status, body, content_type = expo_update_body(
             release, bundle_path.read_bytes(), f"{proto}://{host}/api/mobile/bundle",
-            request.headers.get("expo-current-update-id"),
+            request.headers.get("expo-current-update-id"), asset_key=bundle_path.name,
         )
         return _http_response(body, status=status, content_type=content_type, extra_headers=_NO_STORE_HEADERS)
 

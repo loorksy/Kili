@@ -16,11 +16,35 @@ from nanobot.security.runtime_storage import get_config_path
 
 APK_NAME = "kili.apk"
 BUNDLE_NAME = "bundle.js"
+HERMES_BUNDLE_NAME = "bundle.hbc"
 RELEASE_NAME = "release.json"
 
 
+def packaged_release() -> Path:
+    return Path(__file__).resolve().parents[2] / "deploy" / "mobile-release"
+
+
+def published_bundle(directory: Path) -> Path | None:
+    for name in (HERMES_BUNDLE_NAME, BUNDLE_NAME):
+        candidate = directory / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _release_ready(path: Path) -> bool:
+    return (path / APK_NAME).is_file() or published_bundle(path) is not None
+
+
 def release_root() -> Path:
-    return get_config_path().parent / "mobile-release"
+    """Prefer files published on the server, then the copy shipped with the source."""
+    data = get_config_path().parent / "mobile-release"
+    if _release_ready(data):
+        return data
+    packaged = packaged_release()
+    if _release_ready(packaged):
+        return packaged
+    return data
 
 
 def update_action(version_code: int, bundle_revision: int, remote: dict[str, Any]) -> str | None:
@@ -49,7 +73,7 @@ def read_release(root: Path | None = None) -> dict[str, Any]:
         "apk_url": "/downloads/kili.apk",
         "bundle_url": "/api/mobile/bundle",
         "apk_available": (directory / APK_NAME).is_file(),
-        "bundle_available": (directory / BUNDLE_NAME).is_file(),
+        "bundle_available": published_bundle(directory) is not None,
     }
     if path.is_file():
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -58,7 +82,7 @@ def read_release(root: Path | None = None) -> dict[str, Any]:
                 if key in raw:
                     payload[key] = raw[key]
     payload["apk_available"] = (directory / APK_NAME).is_file()
-    payload["bundle_available"] = (directory / BUNDLE_NAME).is_file()
+    payload["bundle_available"] = published_bundle(directory) is not None
     return payload
 
 
@@ -67,7 +91,8 @@ def asset_hash(data: bytes) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip("=")
 
 
-def expo_update_body(release: dict[str, Any], bundle: bytes, asset_url: str, current_id: str | None) -> tuple[int, bytes, str]:
+def expo_update_body(release: dict[str, Any], bundle: bytes, asset_url: str, current_id: str | None,
+                     asset_key: str = "bundle.js") -> tuple[int, bytes, str]:
     """Return status, body, and content type for the Expo Updates protocol."""
     update_id = release.get("update_id")
     if not isinstance(update_id, str) or not update_id or current_id == update_id:
@@ -78,7 +103,7 @@ def expo_update_body(release: dict[str, Any], bundle: bytes, asset_url: str, cur
         "runtimeVersion": release.get("runtime_version") or "0.1.0",
         "launchAsset": {
             "hash": asset_hash(bundle),
-            "key": "bundle.js",
+            "key": asset_key,
             "contentType": "application/javascript",
             "url": asset_url,
         },

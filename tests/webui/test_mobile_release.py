@@ -24,6 +24,20 @@ def test_publish_script_copies_the_bundle_and_bumps_the_revision(tmp_path):
     assert published["update_id"]
 
 
+def test_packaged_bundle_answers_the_update_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.webui.mobile_release.get_config_path", lambda: tmp_path / "config.json")
+    from nanobot.webui.mobile_release import release_root
+    root = release_root()
+    bundle = root / "bundle.hbc"
+    assert bundle.is_file()
+    release = read_release(root)
+    status, body, content_type = expo_update_body(
+        release, bundle.read_bytes(), "https://kili.lork.cloud/api/mobile/bundle", None, asset_key=bundle.name,
+    )
+    assert status == 200 and "multipart/mixed" in content_type
+    assert b"bundle.hbc" in body
+
+
 def test_native_bump_asks_for_an_apk_and_a_bundle_stays_on_the_same_apk():
     remote = {"version_code": 2, "bundle_revision": 4}
     assert update_action(1, 9, remote) == "apk"
