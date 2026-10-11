@@ -26,7 +26,40 @@ describe("Backend-owned approval", () => {
     await screen.findByText("Approved");
     expect(screen.queryByText(/forged benign/)).not.toBeInTheDocument();
     expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", id, true);
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+  });
+  it("rejects through the same resolve call and ignores a second click", async () => {
+    mocks.read.mockResolvedValue({ id, status: "PENDING", action: { volume: "0.10" } });
+    let finish: (value: { id: string; status: string }) => void = () => undefined;
+    mocks.resolve.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<ActionApproval reference={reference} />);
+    const reject = await screen.findByRole("button", { name: "Reject" });
+    fireEvent.click(reject);
+    fireEvent.click(reject);
+    finish({ id, status: "DENIED" });
+    await screen.findByText("Rejected");
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    expect(mocks.resolve).toHaveBeenCalledWith({}, "websocket:main", id, false);
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+  });
+  it("shows an already rejected or expired request without offering another decision", async () => {
+    mocks.read.mockResolvedValue({ id, status: "DENIED", action: { volume: "0.10" } });
+    render(<ActionApproval reference={reference} />);
+    expect(await screen.findByText("Rejected")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(mocks.resolve).not.toHaveBeenCalled();
+  });
+  it("disables both buttons when the approval has expired", async () => {
+    mocks.read.mockResolvedValue({ id, status: "EXPIRED", action: { volume: "0.10" } });
+    render(<ActionApproval reference={reference} />);
+    expect(await screen.findByText("Expired")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    expect(mocks.resolve).not.toHaveBeenCalled();
   });
   it("fails closed when the record is unavailable", async () => {
     mocks.read.mockRejectedValue(new Error("gone"));
@@ -37,8 +70,9 @@ describe("Backend-owned approval", () => {
   it("restores consumed state rather than offering another approval", async () => {
     mocks.read.mockResolvedValue({ id, status: "CONSUMED", action: {} });
     render(<ActionApproval reference={reference} />);
-    await waitFor(() => expect(screen.getByText("CONSUMED")).toBeVisible());
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Already resolved")).toBeVisible());
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
 });
 

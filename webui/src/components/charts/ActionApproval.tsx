@@ -1,15 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/providers/ClientProvider";
 import { editActionApproval, fetchActionApproval, resolveActionApproval } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 
+function approvalStatusLabel(status: string): string {
+  if (status === "PENDING") return "Waiting for approval";
+  if (status === "APPROVED") return "Approved";
+  if (status === "DENIED") return "Rejected";
+  if (status === "CONSUMED") return "Already resolved";
+  if (status === "EXPIRED") return "Expired";
+  return status;
+}
+
 export function ActionApproval({ reference }: { reference: string }) {
   const { client, token } = useClient();
   const [status, setStatus] = useState("Loading approval…");
   const [action, setAction] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
+  const resolving = useRef(false);
   const [replacement, setReplacement] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [lot, setLot] = useState("");
@@ -24,16 +34,17 @@ export function ActionApproval({ reference }: { reference: string }) {
     if (!approvalId || !sessionKey) return;
     let active = true;
     void fetchActionApproval(token, sessionKey, approvalId).then(value => {
-      if (active) { setReplacement(value.id !== approvalId ? value.id : null); setAction(value.action); setStatus(value.status === "PENDING" ? "Waiting for approval" : value.status); }
+      if (active) { setReplacement(value.id !== approvalId ? value.id : null); setAction(value.action); setStatus(approvalStatusLabel(value.status)); }
     }).catch(() => { if (active) setStatus("Approval unavailable or expired"); });
     return () => { active = false; };
   }, [approvalId, sessionKey, token]);
   async function resolve(approve: boolean) {
-    if (!approvalId || !sessionKey || !action) return;
+    if (!approvalId || !sessionKey || !action || resolving.current || status !== "Waiting for approval") return;
+    resolving.current = true;
     setBusy(true);
     try {
       const response = await resolveActionApproval(client, sessionKey, replacement ?? approvalId, approve);
-      setStatus(response.status === "APPROVED" ? "Approved" : "Denied");
+      setStatus(response.status === "APPROVED" ? "Approved" : "Rejected");
     } catch { setStatus("Approval unavailable or expired"); }
     finally { setBusy(false); }
   }
@@ -77,10 +88,10 @@ export function ActionApproval({ reference }: { reference: string }) {
       <p className="text-xs text-muted-foreground">Profit is not guaranteed. Approval grants only the exact limits and finish behaviors below.</p>
     </div>}
     {action && <details className="my-2"><summary>Action details</summary><pre className="overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(action, null, 2)}</pre></details>}
-    {status === "Waiting for approval" && action && <div className="flex gap-3">
-      <Button size="sm" disabled={busy} onClick={() => void resolve(true)}>Approve</Button>
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void resolve(false)}>Deny</Button>
-      {intent && ["open", "close_position"].includes(String(intent.operation)) && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setLot(String(intent.volume ?? "")); setEditing(true); }}>Edit lot</Button>}
+    {(action || status === "Approval unavailable or expired") && <div className="flex gap-3">
+      <Button size="sm" disabled={busy || status !== "Waiting for approval"} onClick={() => void resolve(true)}>Approve</Button>
+      <Button size="sm" variant="outline" disabled={busy || status !== "Waiting for approval"} onClick={() => void resolve(false)}>Reject</Button>
+      {status === "Waiting for approval" && intent && ["open", "close_position"].includes(String(intent.operation)) && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setLot(String(intent.volume ?? "")); setEditing(true); }}>Edit lot</Button>}
     </div>}
     {editing && <div className="mt-3 flex flex-wrap gap-2">
       <Input aria-label="Trade lot size" inputMode="decimal" value={lot} onChange={event => setLot(event.target.value)} className="max-w-40" />
