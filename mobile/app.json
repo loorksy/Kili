@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Kili",
+    "slug": "kili",
+    "scheme": "kili",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.kili.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Kili uses the camera when you attach a photo to a conversation.",
+        "NSPhotoLibraryUsageDescription": "Kili uses your photos when you attach an image to a conversation."
+      }
+    },
+    "android": {
+      "package": "ai.kili.mobile",
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#1c1c1c"
+        }
+      ]
+    ],
+    "extra": {
+      "product": "Kili"
+    }
+  }
+}

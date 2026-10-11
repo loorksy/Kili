@@ -1,0 +1,28 @@
+{
+  "name": "kili-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/i18n.test.ts src/kili/protocol.test.ts src/kili/session.test.ts"
+  },
+  "dependencies": {
+    "expo": "~53.0.20",
+    "expo-document-picker": "~13.1.6",
+    "expo-file-system": "~18.1.11",
+    "expo-image-picker": "~16.1.4",
+    "expo-notifications": "~0.31.4",
+    "expo-secure-store": "~14.2.3",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "^0.79.6"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.14",
+    "typescript": "~5.8.3"
+  }
+}
