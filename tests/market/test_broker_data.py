@@ -45,6 +45,11 @@ async def test_all_broker_symbols_and_account_native_identity():
     quote = await first.quote("US500+", first.canonical("US500+"))
     assert quote.bid == Decimal("5000.01")
     assert quote.source == "metaapi" and quote.account_id == "first"
+    discovered = await first.quote("GOLDm", "GOLDm")
+    assert discovered.canonical_instrument == first.canonical("GOLDm")
+    assert discovered.provider_instrument == "GOLDm"
+    with pytest.raises(ValueError, match="mapping"):
+        await first.quote("GOLDm", "gold-label")
     with pytest.raises(ValueError, match="not available"):
         await first.quote("XAUUSD", first.canonical("XAUUSD"))
 
@@ -62,7 +67,8 @@ async def test_normalized_history_is_sorted_scoped_and_preserves_completeness(mo
     start = datetime(2026, 10, 8, 10, tzinfo=timezone.utc)
     request = AsyncMock(return_value=[bar(start + timedelta(minutes=2)), bar(start), bar(start + timedelta(minutes=1))])
     monkeypatch.setattr("nanobot.market.broker.account_bridge", lambda *_: SimpleNamespace(request=request))
-    candles = await market.candles("US500+", market.canonical("US500+"), "M1", count=3)
+    candles = await market.candles("US500+", "US500+", "M1", count=3)
+    assert candles[0].canonical_instrument == market.canonical("US500+")
     assert [c.time for c in candles] == [start + timedelta(minutes=i) for i in range(3)]
     assert [c.complete for c in candles] == [True, True, False]
     assert all(c.source == "metaapi" and c.account_id == "first" for c in candles)

@@ -84,28 +84,40 @@ class BrokerMarket:
         return [BrokerInstrument(name=symbol, display_name=symbol, canonical_instrument=self.canonical(symbol),
                                  account_id=self.connection.account_id) for symbol in symbols]
 
+    def evidence_canonical(self, symbol: str, canonical: str) -> str:
+        """Identity stored on quotes and candles for one exact broker symbol."""
+        native = self.canonical(symbol)
+        if canonical in {symbol, native}:
+            return native
+        return canonical
+
     async def verify(self, symbol: str, canonical: str) -> None:
         self.client.validate_symbol(symbol)
         if symbol not in await self.client.symbols():
             raise ValueError("Instrument is not available from this broker account")
-        if canonical != self.canonical(symbol):
-            # Existing explicitly verified canonical mappings remain usable;
-            # arbitrary model labels never create an execution mapping.
-            from nanobot.trading.instruments import InstrumentMappings
-            mapping = InstrumentMappings().require(self.connection.account_id, canonical)
-            if mapping.provider_symbol != symbol:
-                raise ValueError("Canonical instrument maps to another broker symbol")
+        # A discovered broker symbol is its own quote identity. A different
+        # label still needs an explicit verified mapping and never creates one.
+        if canonical in {symbol, self.canonical(symbol)}:
+            return
+        from nanobot.trading.instruments import InstrumentMappings
+        mapping = InstrumentMappings().require(self.connection.account_id, canonical)
+        if mapping.provider_symbol != symbol:
+            raise ValueError("Canonical instrument maps to another broker symbol")
 
     async def quote(self, symbol: str, canonical: str) -> Quote:
         await self.verify(symbol, canonical)
+        canonical = self.evidence_canonical(symbol, canonical)
         price = await self.client.price(symbol)
         return Quote(canonical_instrument=canonical, provider_instrument=symbol, account_id=self.connection.account_id,
                      time=datetime.fromisoformat(price.time.replace("Z", "+00:00")), bid=price.bid, ask=price.ask,
                      source="metaapi", fetched_at=datetime.now(timezone.utc))
 
     async def stream_prices(self, symbols: dict[str, str]) -> AsyncIterator[Quote]:
+        resolved = {}
         for symbol, canonical in symbols.items():
             await self.verify(symbol, canonical)
+            resolved[symbol] = self.evidence_canonical(symbol, canonical)
+        symbols = resolved
         bridge = account_bridge(self.connection, self.client.secrets)
         async for raw in bridge.stream_quotes(set(symbols)):
             try:
@@ -121,6 +133,7 @@ class BrokerMarket:
     async def candles(self, symbol: str, canonical: str, timeframe: str, *, count: int = 500,
                       before: str | None = None) -> list[Candle]:
         await self.verify(symbol, canonical)
+        canonical = self.evidence_canonical(symbol, canonical)
         if timeframe not in await self.timeframes() or not 1 <= count <= 5000:
             raise ValueError("Unsupported broker timeframe or candle count; maximum view size is 5000")
         boundary = datetime.fromisoformat(before.replace("Z", "+00:00")) if before else None
