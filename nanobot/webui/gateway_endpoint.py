@@ -10,7 +10,6 @@ from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Request as WsRequest
 
 from nanobot.webui.gateway_tokens import GatewayTokenStore
-from nanobot.webui.http_methods import head_response, install_plain_http_methods, request_method
 from nanobot.webui.http_utils import (
     is_trusted_proxy_authenticated_request,
     normalize_config_path,
@@ -49,9 +48,6 @@ class WebUIGatewayEndpoint:
         self._http = http
         self._tokens = tokens
         self.webui_connections: set[ServerConnection] = set()
-        # Connections capture ServerProtocol.parse in their constructor, so the
-        # plain-HTTP parser has to be installed before the listener accepts.
-        install_plain_http_methods()
 
     async def process_request(
         self,
@@ -61,7 +57,6 @@ class WebUIGatewayEndpoint:
         is_allowed: Callable[[str], bool],
     ) -> Any:
         """Route one listener request to a WS handshake or the HTTP application."""
-        install_plain_http_methods()
         got, query = parse_request_path(request.path)
         expected_ws = normalize_config_path(self._config.path)
         if got == expected_ws and is_websocket_upgrade(request):
@@ -77,10 +72,7 @@ class WebUIGatewayEndpoint:
             if not is_allowed(client_id):
                 return connection.respond(403, "Forbidden")
             return self.authorize_websocket_handshake(connection, query, request.headers)
-        response = await self._http.dispatch(connection, request)
-        if request_method(request) == "HEAD":
-            return head_response(response)
-        return response
+        return await self._http.dispatch(connection, request)
 
     def authorize_websocket_handshake(
         self,

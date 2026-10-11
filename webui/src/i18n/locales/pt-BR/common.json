@@ -292,17 +292,17 @@
     "saveError": "Pode haver um problema de conexão. Este lembrete pode aparecer novamente."
   },
   "app": {
-    "brand": "Kili",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "Conectando-se ao Kili…",
-      "boot": "Carregando Kili…"
+      "connecting": "Conectando-se ao nanobot…",
+      "boot": "Carregando nanobot…"
     },
     "error": {
       "title": "Não foi possível conectar-se com o nanobot",
       "gatewayHint": "Verifique se o gateway está em execução (`nanobot gateway`) e se este navegador consegue acessar o endereço da WebUI."
     },
     "auth": {
-      "title": "Conectar ao Kili",
+      "title": "Conectar ao nanobot",
       "label": "Senha da WebUI",
       "helpTitle": "Onde encontro a senha?",
       "helpConfig": "No dispositivo que executa o nanobot, abra o arquivo de configuração, geralmente em:",
@@ -332,11 +332,11 @@
       "completed": "Reinício concluído em {{seconds}}s."
     },
     "documentTitle": {
-      "base": "Kili",
+      "base": "nanobot",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "Interface web do Kili — converse com o seu espaço de trabalho do Kili."
+      "description": "Interface web do nanobot — converse com o seu espaço de trabalho do nanobot."
     },
     "pairing": {
       "title": "Parear sua conta de chat",
@@ -376,8 +376,7 @@
     "automations": "Automações",
     "skills": {
       "title": "Habilidades"
-    },
-    "sections": {"chats": "Conversas", "tools": "Ferramentas"}
+    }
   },
   "settings": {
     "timezoneNoMatches": "Nenhum fuso horário encontrado.",
@@ -2304,6 +2303,5 @@
       "usePath": "Usar caminho",
       "absolutePathRequired": "Informe um caminho absoluto de pasta nesta máquina."
     }
-  },
-  "trading": {"approval": {"loading": "Loading approval…", "pending": "Waiting for approval", "approved": "Approved", "denied": "Denied", "unavailable": "Approval unavailable or expired", "invalid": "Invalid approval reference.", "mandateTitle": "Trading mandate", "buyTitle": "Buy request", "sellTitle": "Sell request", "actionTitle": "Action request", "aria": "Action approval", "symbol": "Broker symbol", "account": "Account", "unavailableValue": "Unavailable", "operation": "Operation", "side": "Side", "orderType": "Order type", "volume": "Volume", "price": "Price", "stopLoss": "Stop loss", "takeProfit": "Take profit", "exact": "Approval applies only to these exact parameters. This is not an executed trade.", "mandateLine": "Trading mandate · {{mode}} · Account {{account}}", "maxLoss": "Maximum mission loss: {{loss}} {{currency}}", "openRisk": "Maximum open risk: {{open}} · Per trade: {{perTrade}}", "expires": "Expires: {{when}}", "noGuarantee": "Profit is not guaranteed. Approval grants only the exact limits and finish behaviors below.", "details": "Action details", "approve": "Approve", "deny": "Deny", "editLot": "Edit lot", "lotLabel": "Trade lot size", "updatePreview": "Update preview", "lotHint": "Broker constraints are checked again. The old approval is revoked; approve the new exact preview.", "lotFailed": "Could not update lot size. Refresh the approval and check broker limits."}}
+  }
 }

@@ -19,7 +19,7 @@ describe("Durable trading mission in chat", () => {
     const view = render(<TradingMission reference={reference} />);
     fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
     await screen.findByRole("button", { name: "Resume" });
-    expect(mocks.control).toHaveBeenCalledWith({}, "websocket:main", id, "pause", undefined);
+    expect(mocks.control).toHaveBeenCalledWith({}, "websocket:main", id, "pause");
     expect(screen.queryByText("forged goal")).not.toBeInTheDocument();
     view.unmount();
     mocks.read.mockResolvedValue({ ...state, status: "PAUSED" });
@@ -31,14 +31,5 @@ describe("Durable trading mission in chat", () => {
     render(<TradingMission reference={reference} />);
     expect(await screen.findByText(/Performance evidence is incomplete/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
-  });
-  it("approves a waiting mandate with the exact fingerprint", async () => {
-    const fingerprint = "e".repeat(64);
-    mocks.read.mockResolvedValue({ ...state, status: "AWAITING_MANDATE_APPROVAL", approved: false, fingerprint, account_id: "demo", max_risk_per_trade: "20" });
-    mocks.control.mockResolvedValue({ ...state, status: "ACTIVE", approved: true, fingerprint });
-    render(<TradingMission reference={reference} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(mocks.control).toHaveBeenCalledWith({}, "websocket:main", id, "approve", fingerprint);
-    expect(screen.queryByText("/approve")).not.toBeInTheDocument();
   });
 });

@@ -184,9 +184,6 @@ _WEBUI_MUTATION_PATHS = {
     "remote.remove": "/api/remote-instances/remove",
     "remote.fingerprint": "/api/remote-instances/fingerprint",
     "remote.trust": "/api/remote-instances/trust",
-    "agents.create": "/api/webui/agents",
-    "agents.group": "/api/webui/agent-groups",
-    "agents.members": "/api/webui/agent-groups/members",
     "automation.enable": "/api/webui/automations/enable",
     "automation.disable": "/api/webui/automations/disable",
     "automation.delete": "/api/webui/automations/delete",
@@ -608,8 +605,6 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
-        if got in {"/downloads/kili.apk", "/api/mobile/release", "/api/mobile/bundle", "/api/mobile/updates"}:
-            return self._handle_mobile_release(request, got)
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
         # Token issue endpoint
@@ -658,10 +653,6 @@ class GatewayHTTPHandler:
 
         # Automation routes
         response = await self._dispatch_automation_routes(request, got)
-        if response is not None:
-            return response
-
-        response = self._dispatch_agent_routes(request, got)
         if response is not None:
             return response
 
@@ -986,10 +977,6 @@ class GatewayHTTPHandler:
             update_chart,
         )
 
-        if path == "/api/webui/action-approvals/resolve" and not getattr(
-            request, _WEBUI_MUTATION_REQUEST_ATTR, False
-        ):
-            return _http_error(405, "Approval requires authenticated WebSocket")
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         payload = _mutation_payload(request)
@@ -1033,10 +1020,10 @@ class GatewayHTTPHandler:
             elif path.endswith("/resolve"):
                 if payload is None:
                     return _http_error(405, "Approval requires authenticated WebSocket")
-                approval_id, approve, fingerprint = payload.get("approval_id"), payload.get("approve"), payload.get("fingerprint")
-                if not isinstance(approval_id, str) or not isinstance(approve, bool) or not isinstance(fingerprint, str):
+                approval_id, approve = payload.get("approval_id"), payload.get("approve")
+                if not isinstance(approval_id, str) or not isinstance(approve, bool):
                     return _http_error(400, "Invalid approval resolution")
-                result = resolve_approval(principal, approval_id, approve, fingerprint)
+                result = resolve_approval(principal, approval_id, approve)
                 from nanobot.session.action_turns import queue_approval_resolutions
                 queue_approval_resolutions(self.session_manager.responsibilities)
             elif path == "/api/webui/action-approvals":
@@ -1501,93 +1488,6 @@ class GatewayHTTPHandler:
         )
 
     # -- Automation routes --------------------------------------------------
-
-    def _handle_mobile_release(self, request: WsRequest, got: str) -> Response:
-        from nanobot.webui.mobile_release import (
-            APK_NAME,
-            expo_update_body,
-            published_bundle,
-            read_release,
-            release_root,
-        )
-        root = release_root()
-        release = read_release(root)
-        if got == "/api/mobile/release":
-            return _http_json_response(release, extra_headers=_NO_STORE_HEADERS)
-        if got == "/downloads/kili.apk":
-            apk = root / APK_NAME
-            if not apk.is_file():
-                return _http_response(b"The Android app has not been published yet.\n", status=404, content_type="text/plain; charset=utf-8")
-            return _http_response(apk.read_bytes(), content_type="application/vnd.android.package-archive", extra_headers=[
-                ("Content-Disposition", 'attachment; filename="kili.apk"'),
-                ("Cache-Control", "no-cache"),
-            ])
-        bundle_path = published_bundle(root)
-        if got == "/api/mobile/bundle":
-            if bundle_path is None:
-                return _http_error(404, "Interface bundle is not published")
-            return _http_response(bundle_path.read_bytes(), content_type="application/javascript", extra_headers=_NO_STORE_HEADERS)
-        host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "127.0.0.1").split(",")[0].strip()
-        proto = (request.headers.get("X-Forwarded-Proto") or "https").split(",")[0].strip()
-        if bundle_path is None:
-            return _http_response(b"", status=204, content_type="text/plain")
-        status, body, content_type = expo_update_body(
-            release, bundle_path.read_bytes(), f"{proto}://{host}/api/mobile/bundle",
-            request.headers.get("expo-current-update-id"), asset_key=bundle_path.name,
-        )
-        return _http_response(body, status=status, content_type=content_type, extra_headers=_NO_STORE_HEADERS)
-
-    def _home_routines(self) -> list[dict[str, str]]:
-        from nanobot.webui.session_automations import all_automations_payload
-        payload = all_automations_payload(
-            self.cron_service,
-            local_trigger_store=self.local_trigger_store,
-            session_manager=self.session_manager,
-            pending_job_ids=self._pending_cron_job_ids_for_all(),
-        )
-        rows: list[dict[str, str]] = []
-        for job in payload.get("jobs", []):
-            if not isinstance(job, dict):
-                continue
-            message = job.get("payload")
-            subtitle = ""
-            if isinstance(message, dict) and isinstance(message.get("message"), str):
-                subtitle = message["message"][:120]
-            schedule = job.get("schedule")
-            if not subtitle and isinstance(schedule, dict):
-                subtitle = str(schedule.get("kind") or "")
-            rows.append({"id": str(job.get("id") or ""), "name": str(job.get("name") or "Routine"), "subtitle": subtitle})
-        return rows
-
-    def _dispatch_agent_routes(self, request: WsRequest, got: str) -> Response | None:
-        if got not in {"/api/webui/agents", "/api/webui/home", "/api/webui/agent-groups", "/api/webui/agent-groups/members"}:
-            return None
-        if not self.check_api_token(request):
-            return _http_error(401, "Unauthorized")
-        if self.session_manager is None:
-            return _http_error(404, "Conversations are unavailable")
-        from nanobot.agents.roster import AgentDraft, AgentRoster, GroupDraft, MembershipChange
-        roster = AgentRoster(self.session_manager)
-        payload = _mutation_payload(request)
-        try:
-            if got == "/api/webui/home" and payload is None:
-                query = _request_query(request)
-                kind = (_query_first(query, "filter") or "all")
-                text = _query_first(query, "q") or ""
-                result = roster.home_feed(text, kind, self._home_routines())
-            elif got == "/api/webui/agents" and payload is None:
-                result = roster.list_state()
-            elif got == "/api/webui/agents" and payload is not None:
-                result = roster.create_agent(AgentDraft.model_validate(payload))
-            elif got == "/api/webui/agent-groups" and payload is not None:
-                result = roster.create_group(GroupDraft.model_validate(payload))
-            elif got == "/api/webui/agent-groups/members" and payload is not None:
-                result = roster.change_member(MembershipChange.model_validate(payload))
-            else:
-                return _http_error(405, "Agent changes require authenticated WebSocket")
-        except (ValueError, PermissionError) as exc:
-            return _http_error(400, str(exc))
-        return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
 
     async def _dispatch_automation_routes(
         self,

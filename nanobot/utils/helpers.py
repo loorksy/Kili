@@ -977,7 +977,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     for item in tpl.iterdir():
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
-    _replace_stock_soul(workspace)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(tpl / "prompts" / "README.md", workspace / "prompts" / "README.md")
     _write(None, workspace / "memory" / "history.jsonl")
@@ -1006,30 +1005,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         logger.exception("Failed to initialize git store for {}", workspace)
 
     return added
-
-
-def _replace_stock_soul(workspace: Path) -> None:
-    """Rewrite an untouched nanobot profile so the agent introduces itself as Kili."""
-    dest = workspace / "SOUL.md"
-    if not dest.is_file():
-        return
-    current = dest.read_text(encoding="utf-8")
-    legacy = load_bundled_template("legacy/SOUL.md")
-    updated = load_bundled_template("SOUL.md")
-    if not legacy or not updated or current.strip() == updated.strip():
-        return
-    if not _is_stock_nanobot_soul(current, legacy):
-        return
-    dest.write_text(updated, encoding="utf-8")
-
-
-def _is_stock_nanobot_soul(current: str, legacy: str) -> bool:
-    """True when every line is from the stock profile, including a shortened copy."""
-    if "I am nanobot" not in current:
-        return False
-    legacy_lines = {line.strip() for line in legacy.splitlines() if line.strip()}
-    current_lines = [line.strip() for line in current.splitlines() if line.strip()]
-    return bool(current_lines) and all(line in legacy_lines for line in current_lines)
 
 
 def load_bundled_template(template_name: str) -> str | None:

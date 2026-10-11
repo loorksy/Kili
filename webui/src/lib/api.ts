@@ -1372,13 +1372,11 @@ export function fetchChartCandles(token: string, chartId: string, sessionKey: st
 export function updateCloudChart(transport: WebUIMutationTransport, sessionKey: string, operation: Record<string, unknown>) {
   return mutation<import("@/components/charts/contract").CloudChartState>(transport, "chart.update", { session_key: sessionKey, operation });
 }
-export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean, fingerprint: string) {
-  return mutation<{ id: string; status: string; fingerprint: string }>(transport, "approval.resolve", {
-    session_key: sessionKey, approval_id: approvalId, approve, fingerprint,
-  });
+export function resolveActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, approve: boolean) {
+  return mutation<{ id: string; status: string }>(transport, "approval.resolve", { session_key: sessionKey, approval_id: approvalId, approve });
 }
 export function editActionApproval(transport: WebUIMutationTransport, sessionKey: string, approvalId: string, volume: string) {
-  return mutation<{ id: string; status: string; fingerprint: string; action: Record<string, unknown> }>(transport, "approval.edit", { session_key: sessionKey, approval_id: approvalId, volume });
+  return mutation<{ id: string; status: string; action: Record<string, unknown> }>(transport, "approval.edit", { session_key: sessionKey, approval_id: approvalId, volume });
 }
 
 export interface IntegrationStatus {
@@ -1399,22 +1397,9 @@ export function configureInstrumentMapping(transport: WebUIMutationTransport, va
   return mutation<Record<string, unknown>>(transport, "settings.integrations.map", values);
 }
 
-export interface ApprovalCard {
-  instrument: string | null;
-  side: string | null;
-  volume: string | null;
-  entry: string | null;
-  stop_loss: string | null;
-  take_profit: string | null;
-  risk: string | null;
-  account: string | null;
-  mode: string | null;
-  expires_at: number;
-  fingerprint: string;
-}
 export function fetchActionApproval(token: string, sessionKey: string, approvalId: string) {
   const query = new URLSearchParams({ session_key: sessionKey, approval_id: approvalId });
-  return request<{ id: string; status: string; fingerprint: string; expires_at: number; card: ApprovalCard; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
+  return request<{ id: string; status: string; action: Record<string, unknown> }>(`/api/webui/action-approvals?${query}`, token);
 }
 
 export interface TradingMissionState {
@@ -1435,61 +1420,14 @@ export interface TradingMissionState {
   monitoring_summary: string;
   approved: boolean;
   expires_at: number;
-  fingerprint?: string;
-  account_id?: string;
-  max_mission_loss?: string;
-  max_risk_per_trade?: string;
-  instruments?: string[];
 }
 export function fetchTradingMission(token: string, sessionKey: string, mandateId: string) {
   const query = new URLSearchParams({ session_key: sessionKey, mandate_id: mandateId });
   return request<TradingMissionState>(`/api/webui/trading-missions?${query}`, token);
 }
 export function controlTradingMission(transport: WebUIMutationTransport, sessionKey: string, mandateId: string,
-  operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop" | "approve" | "deny",
-  fingerprint?: string) {
-  return mutation<TradingMissionState>(transport, "mission.control", {
-    session_key: sessionKey, mandate_id: mandateId, operation, ...(fingerprint ? { fingerprint } : {}),
-  });
-}
-export interface KiliAgentSummary {
-  id: string;
-  name: string;
-  instructions: string;
-  session_key: string;
-}
-export interface KiliGroupSummary {
-  id: string;
-  name: string;
-  session_key: string;
-  member_ids: string[];
-  members: { id: string; name: string }[];
-}
-export interface HomeFeedItem {
-  kind: "bot" | "group" | "file" | "routine";
-  id: string;
-  title: string;
-  subtitle: string;
-  updated_at: number | null;
-  session_key: string | null;
-  shape: string;
-  color: string;
-}
-export function fetchHome(token: string, query = "", filter = "all") {
-  const params = new URLSearchParams({ q: query, filter });
-  return request<{ items: HomeFeedItem[]; filters: string[] }>(`/api/webui/home?${params}`, token);
-}
-export function fetchAgentRoster(token: string) {
-  return request<{ agents: KiliAgentSummary[]; groups: KiliGroupSummary[] }>("/api/webui/agents", token);
-}
-export function createKiliAgent(transport: WebUIMutationTransport, name: string, instructions: string, shape = "blob", color = "#3b82f6") {
-  return mutation<KiliAgentSummary>(transport, "agents.create", { name, instructions, shape, color });
-}
-export function createKiliGroup(transport: WebUIMutationTransport, name: string, memberIds: string[]) {
-  return mutation<KiliGroupSummary>(transport, "agents.group", { name, member_ids: memberIds });
-}
-export function changeKiliGroupMember(transport: WebUIMutationTransport, groupId: string, agentId: string, operation: "add" | "remove") {
-  return mutation<KiliGroupSummary>(transport, "agents.members", { group_id: groupId, agent_id: agentId, operation });
+  operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop") {
+  return mutation<TradingMissionState>(transport, "mission.control", { session_key: sessionKey, mandate_id: mandateId, operation });
 }
 export function configureAutonomousTrading(transport: WebUIMutationTransport, enabled: boolean) {
   return mutation<IntegrationStatus>(transport, "settings.integrations.autonomy", { enabled });

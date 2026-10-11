@@ -114,7 +114,7 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     assert "one root and relative SKILL.md paths" in prompt
     assert "Join them when using `read_file`" in prompt
     assert str(project.resolve()) not in prompt
-    assert f"Kili's agent workspace: {agent_workspace.resolve()}" in prompt
+    assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt

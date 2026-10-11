@@ -292,17 +292,17 @@
     "saveError": "ネットワークに問題が発生した可能性があります。この案内が再び表示されることがあります。"
   },
   "app": {
-    "brand": "Kili",
+    "brand": "nanobot",
     "loading": {
-      "connecting": "Kili に接続中…",
-      "boot": "Kili を読み込み中…"
+      "connecting": "nanobot に接続中…",
+      "boot": "nanobot を読み込み中…"
     },
     "error": {
       "title": "nanobot に接続できませんでした",
       "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このブラウザーから WebUI のアドレスに到達できることを確認してください。"
     },
     "auth": {
-      "title": "Kili に接続",
+      "title": "nanobot に接続",
       "label": "WebUI パスワード",
       "helpTitle": "パスワードはどこにありますか？",
       "helpConfig": "nanobot を実行しているデバイスで設定ファイルを開きます。通常は次の場所にあります：",
@@ -332,11 +332,11 @@
       "completed": "{{seconds}} 秒で再起動が完了しました。"
     },
     "documentTitle": {
-      "base": "Kili",
+      "base": "nanobot",
       "chat": "{{title}}"
     },
     "meta": {
-      "description": "Kili Web UI — Kili ワークスペースと会話します。"
+      "description": "nanobot Web UI — nanobot ワークスペースと会話します。"
     },
     "pairing": {
       "title": "チャットアカウントをペアリング",
@@ -376,8 +376,7 @@
     "automations": "自動タスク",
     "skills": {
       "title": "スキル"
-    },
-    "sections": {"chats": "チャット", "tools": "ツール"}
+    }
   },
   "settings": {
     "timezoneNoMatches": "一致するタイムゾーンがありません。",
@@ -2290,6 +2289,5 @@
       "usePath": "パスを使用",
       "absolutePathRequired": "このマシン上の絶対フォルダーパスを入力してください。"
     }
-  },
-  "trading": {"approval": {"loading": "Loading approval…", "pending": "Waiting for approval", "approved": "Approved", "denied": "Denied", "unavailable": "Approval unavailable or expired", "invalid": "Invalid approval reference.", "mandateTitle": "Trading mandate", "buyTitle": "Buy request", "sellTitle": "Sell request", "actionTitle": "Action request", "aria": "Action approval", "symbol": "Broker symbol", "account": "Account", "unavailableValue": "Unavailable", "operation": "Operation", "side": "Side", "orderType": "Order type", "volume": "Volume", "price": "Price", "stopLoss": "Stop loss", "takeProfit": "Take profit", "exact": "Approval applies only to these exact parameters. This is not an executed trade.", "mandateLine": "Trading mandate · {{mode}} · Account {{account}}", "maxLoss": "Maximum mission loss: {{loss}} {{currency}}", "openRisk": "Maximum open risk: {{open}} · Per trade: {{perTrade}}", "expires": "Expires: {{when}}", "noGuarantee": "Profit is not guaranteed. Approval grants only the exact limits and finish behaviors below.", "details": "Action details", "approve": "Approve", "deny": "Deny", "editLot": "Edit lot", "lotLabel": "Trade lot size", "updatePreview": "Update preview", "lotHint": "Broker constraints are checked again. The old approval is revoked; approve the new exact preview.", "lotFailed": "Could not update lot size. Refresh the approval and check broker limits."}}
+  }
 }

@@ -364,7 +364,7 @@ describe("App layout", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveClass("startup-status");
-    expect(screen.queryByText("Loading Kili…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading nanobot…")).not.toBeInTheDocument();
   });
 
   it.each([false, true])("enables task controls only when bootstrap advertises support: %s", async (supported) => {
@@ -402,9 +402,8 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Connect to Kili" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download the app" })).toHaveAttribute("href", "/downloads/kili.apk");
     const password = screen.getByLabelText("WebUI password");
     expect(password).not.toHaveAttribute("aria-describedby");
     expect(password).toHaveAttribute(
@@ -431,9 +430,8 @@ describe("App layout", () => {
     await screen.findByRole("listbox");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    expect(await screen.findByRole("heading", { name: "连接到 Kili" }))
+    expect(await screen.findByRole("heading", { name: "连接到 nanobot" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download the app" })).toHaveAttribute("href", "/downloads/kili.apk");
     expect(screen.getByLabelText("WebUI 密码")).toHaveValue("draft-password");
     expect(screen.getByRole("button", { name: "连接", exact: true })).toBeEnabled();
     expect(document.documentElement.lang).toBe("zh-CN");
@@ -454,8 +452,6 @@ describe("App layout", () => {
     await user.type(password, "draft-password");
     await user.tab();
     await user.tab();
-    await user.tab();
-    expect(screen.getByRole("link", { name: "Download the app" })).toHaveFocus();
     await user.tab();
     const help = screen.getByRole("button", { name: "Where can I find the password?" });
     expect(help).toHaveFocus();
@@ -542,9 +538,8 @@ describe("App layout", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Connect to Kili" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Connect to nanobot" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download the app" })).toHaveAttribute("href", "/downloads/kili.apk");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(connectSpy).not.toHaveBeenCalled();
   });
@@ -3214,7 +3209,7 @@ describe("App layout", () => {
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
-    await waitFor(() => expect(document.title).toBe("Kili"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
     expect(
@@ -3222,7 +3217,7 @@ describe("App layout", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
-    await waitFor(() => expect(document.title).toBe("Kili"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
   });
 

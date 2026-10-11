@@ -1,8 +1,0 @@
-appId: ai.kili.mobile
----
-- launchApp
-- assertVisible: "Settings"
-- tapOn: "العربية"
-- assertVisible: "الإعدادات"
-- tapOn: "English"
-- assertVisible: "Gateway address"

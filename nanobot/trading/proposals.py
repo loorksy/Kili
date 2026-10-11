@@ -13,7 +13,7 @@ from nanobot.security.actions import now_ms
 from nanobot.session.records import RecordStore, RuntimeRecord
 from nanobot.trading.instruments import InstrumentMappings
 from nanobot.trading.metaapi import AccountState, BrokerPrice, MetaApiClient, SymbolSpec
-from nanobot.trading.preflight import accept_quote_time, validate_market
+from nanobot.trading.preflight import validate_market
 
 
 class TradeIntent(BaseModel):
@@ -158,8 +158,7 @@ class TradeProposals:
             if price is not None and spec.tick_size is not None and price % spec.tick_size:
                 raise ValueError("Price violates broker tick size / السعر يخالف خطوة التسعير")
 
-    async def validate_current(self, intent: TradeIntent, symbol: str, *, mandate_id: str | None = None,
-                               preview: bool = False) -> tuple[AccountState, SymbolSpec, BrokerPrice]:
+    async def validate_current(self, intent: TradeIntent, symbol: str, *, mandate_id: str | None = None) -> tuple[AccountState, SymbolSpec, BrokerPrice]:
         connection = await self.client.connection_state()
         if connection.id != self.client.connection.account_id or connection.connection_status != "CONNECTED":
             raise ValueError("Trading account is not connected")
@@ -177,8 +176,9 @@ class TradeProposals:
         price = await self.client.price(symbol)
         if price.symbol != symbol or price.bid <= 0 or price.ask < price.bid:
             raise ValueError("Broker price does not match the requested symbol")
-        now = datetime.now(timezone.utc)
-        accept_quote_time(spec, price, now)
+        observed = datetime.fromisoformat(price.time.replace("Z", "+00:00"))
+        if observed.tzinfo is None or not -30 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 300:
+            raise ValueError("Broker price is stale or has no trusted timestamp")
         target = None
         if intent.operation != "open":
             kind = "orders" if intent.operation in {"modify_order", "cancel_order"} else "positions"
@@ -194,7 +194,7 @@ class TradeProposals:
             target = next((p for p in targets if p.id == intent.target_id), None)
             if target is None or target.symbol != symbol:
                 raise ValueError("Exact broker target does not match this instrument")
-        validate_market(intent, spec, price, now, target, allow_closed=preview)
+        validate_market(intent, spec, price, datetime.now(timezone.utc), target)
         return account, spec, price
 
     @staticmethod
@@ -236,7 +236,7 @@ class TradeProposals:
         if proposal.account_id != self.client.connection.account_id:
             raise ValueError("Connected account changed; create a new proposal")
         mapping = self.mappings.require(proposal.account_id, proposal.intent.canonical_instrument)
-        account, spec, price = await self.validate_current(proposal.intent, mapping.provider_symbol,mandate_id=proposal.mandate_id, preview=True)
+        account, spec, price = await self.validate_current(proposal.intent, mapping.provider_symbol,mandate_id=proposal.mandate_id)
         preview_id = "preview_" + uuid.uuid4().hex
         key = f"trade:{proposal.id}:{preview_id}"
         mandate_fingerprint: str | None = None

@@ -324,40 +324,6 @@ class TestSyncWorkspaceTemplates:
         assert isinstance(added, list)
         # The actual files depend on the templates directory
 
-    def test_replaces_an_untouched_nanobot_soul(self, tmp_path):
-        from nanobot.utils.helpers import load_bundled_template
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        legacy = load_bundled_template("legacy/SOUL.md")
-        assert legacy is not None
-        (workspace / "SOUL.md").write_text(legacy, encoding="utf-8")
-        sync_workspace_templates(workspace, silent=True)
-        assert "I am Kili" in (workspace / "SOUL.md").read_text(encoding="utf-8")
-        assert "نانوبوت" in (workspace / "SOUL.md").read_text(encoding="utf-8")
-        (workspace / "SOUL.md").write_text("I am a custom assistant.", encoding="utf-8")
-        sync_workspace_templates(workspace, silent=True)
-        assert (workspace / "SOUL.md").read_text(encoding="utf-8") == "I am a custom assistant."
-
-    def test_replaces_a_shortened_stock_nanobot_soul(self, tmp_path):
-        from nanobot.utils.helpers import load_bundled_template
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        legacy = load_bundled_template("legacy/SOUL.md")
-        assert legacy is not None
-        shortened = legacy.split("## Execution Rules", 1)[0].rstrip() + "\n"
-        assert "I am nanobot" in shortened
-        assert shortened.strip() != legacy.strip()
-        (workspace / "SOUL.md").write_text(shortened, encoding="utf-8")
-        sync_workspace_templates(workspace, silent=True)
-        text = (workspace / "SOUL.md").read_text(encoding="utf-8")
-        assert text.startswith("# Soul")
-        assert "I am Kili" in text
-        assert "I am nanobot" not in text
-        custom = shortened + "\n- I only answer in haiku.\n"
-        (workspace / "SOUL.md").write_text(custom, encoding="utf-8")
-        sync_workspace_templates(workspace, silent=True)
-        assert (workspace / "SOUL.md").read_text(encoding="utf-8") == custom
-
     def test_does_not_overwrite_existing_files(self, tmp_path):
         """Should not overwrite files that already exist."""
         workspace = tmp_path / "workspace"

@@ -224,11 +224,6 @@ class ResponsibilityStore:
                 listener(record)
             except Exception:
                 self._warn_listener(record.id)
-        try:
-            from nanobot.market.watchers import sync_watchers_for_parent
-            sync_watchers_for_parent(self.workspace, record)
-        except Exception:
-            self._warn_listener(record.id)
 
     def _warn_listener(self, responsibility_id: str) -> None:
         now = time.monotonic()

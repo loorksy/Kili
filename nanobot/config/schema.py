@@ -142,7 +142,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high / xhigh / max / adaptive / none — LLM thinking effort; None preserves the provider default
     timezone: str = "UTC"  # Effective IANA timezone, e.g. "Asia/Shanghai"
     timezone_mode: Literal["auto", "manual"] = "auto"
-    bot_name: str = "Kili"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
+    bot_name: str = "nanobot"  # Display name shown in CLI prompts (e.g. "{name} is thinking...")
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
@@ -166,9 +166,6 @@ class AgentDefaults(Base):
             return value
 
         data = dict(cast(dict[str, object], value))
-        # Existing installs saved the old product name. Kili is the identity now.
-        if data.get("botName", data.get("bot_name")) == "nanobot":
-            data["botName"] = "Kili"
         timezone_mode = data.get("timezoneMode", data.get("timezone_mode"))
         if timezone_mode is None:
             timezone_mode = "manual" if "timezone" in data else "auto"

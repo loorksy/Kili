@@ -15,7 +15,6 @@ import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances, useRemoteConnections } from "@/components/remote/RemoteInstances";
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
-import { DownloadAppLink } from "@/components/DownloadAppLink";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
@@ -148,7 +147,6 @@ type ShellRoute = {
   temporary?: boolean;
 };
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
-const KiliHome = lazy(() => import("@/components/KiliHome").then(module => ({ default: module.KiliHome })));
 const ThreadShell = lazy(() => loadThreadShell().then(
   (module) => ({ default: module.ThreadShell }),
 ));
@@ -425,7 +423,7 @@ function AuthForm({
         >
           <div className="text-center">
             <img
-              src="/brand/kili_mark.svg"
+              src="/brand/nanobot_mark.svg"
               alt=""
               width={56}
               height={56}
@@ -496,7 +494,6 @@ function AuthForm({
               </p>
             ) : null}
           </form>
-          <DownloadAppLink className="mt-6 flex min-h-11 items-center justify-center rounded-full bg-foreground px-4 text-sm font-medium text-background" />
           <Disclosure
             className="mt-4"
             summaryClassName="flex min-h-11 items-center justify-center gap-1.5 rounded-compact text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -2931,9 +2928,6 @@ function Shell({
                 view !== "chat" && "hidden",
               )}
             >
-              {view === "chat" && !activeKey && !temporaryChatActive ? (
-                <Suspense fallback={null}><KiliHome onOpenSession={onSelectChat} onOpenSettings={onOpenSettings} /></Suspense>
-              ) : null}
               <ThreadVisibilityContext.Provider value={localActive && !managingConnections && view === "chat"}>
                 <Suspense fallback={<StartupShell embedded />}>
                   <PaneWorkbench

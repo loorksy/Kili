@@ -9,12 +9,12 @@ const NETWORK_FIRST_STATIC_PATHS = new Set([
   "/",
   "/manifest.json",
   ASSET_MANIFEST_PATH,
-  "/brand/kili_apple_touch.png",
-  "/brand/kili_favicon_32.png",
-  "/brand/kili_icon_192.png",
-  "/brand/kili_icon_512.png",
-  "/brand/kili_icon_maskable.png",
-  "/brand/kili_mark.svg",
+  "/brand/nanobot_apple_touch.png",
+  "/brand/nanobot_favicon_32.png",
+  "/brand/nanobot_icon_192.png",
+  "/brand/nanobot_icon_512.png",
+  "/brand/nanobot_icon_maskable.png",
+  "/brand/nanobot_mark.svg",
 ]);
 
 function responseMayBeCached(response) {

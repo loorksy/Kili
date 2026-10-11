@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useClient } from "@/providers/ClientProvider";
-import { LtrText } from "@/components/LtrText";
 import { controlTradingMission, fetchTradingMission, type TradingMissionState } from "@/lib/api";
 
 export function TradingMission({ reference }: { reference: string }) {
@@ -29,10 +28,10 @@ export function TradingMission({ reference }: { reference: string }) {
     const timer = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 15000);
     return () => { active = false; window.clearInterval(timer); };
   }, [id, session, token]);
-  async function control(operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop" | "approve" | "deny", fingerprint?: string) {
+  async function control(operation: "activate" | "pause" | "cancel" | "resume" | "emergency_stop") {
     if (!id || !session || !mission) return;
     setBusy(true);
-    try { setMission(await controlTradingMission(client, session, id, operation, fingerprint)); setNotice(""); }
+    try { setMission(await controlTradingMission(client, session, id, operation)); setNotice(""); }
     catch { setNotice("Action could not be completed. Check approval, connection and mission state."); }
     finally { setBusy(false); }
   }
@@ -51,12 +50,7 @@ export function TradingMission({ reference }: { reference: string }) {
         <pre className="overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(mission.envelope, null, 2)}</pre>
       </details>
       <div className="flex flex-wrap gap-3">
-        {mission.status === "AWAITING_MANDATE_APPROVAL" && !mission.approved && mission.fingerprint && <>
-          <button type="button" className="min-h-11" disabled={busy} onClick={() => void control("approve", mission.fingerprint)}>Approve</button>
-          <button type="button" className="min-h-11" disabled={busy} onClick={() => void control("deny", mission.fingerprint)}>Deny</button>
-          <p className="w-full text-xs text-muted-foreground">Account <LtrText>{mission.account_id ?? ""}</LtrText> · Risk <LtrText>{mission.max_risk_per_trade ?? mission.max_mission_loss ?? ""}</LtrText> {mission.currency}</p>
-        </>}
-        {mission.status === "AWAITING_MANDATE_APPROVAL" && mission.approved && <button disabled={busy} onClick={() => void control("activate")}>Activate approved mandate</button>}
+        {mission.status === "AWAITING_MANDATE_APPROVAL" && <button disabled={busy} onClick={() => void control("activate")}>Activate approved mandate</button>}
         {mission.status === "ACTIVE" && <button disabled={busy} onClick={() => void control("pause")}>Pause</button>}
         {mission.status === "PAUSED" && <button disabled={busy} onClick={() => void control("resume")}>Resume</button>}
         {["ACTIVE", "PAUSED", "NEEDS_ATTENTION"].includes(mission.status) && <>

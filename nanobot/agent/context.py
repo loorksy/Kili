@@ -105,7 +105,6 @@ class ContextBuilder:
         session_summary: SessionSummary | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        agent_profile: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -149,9 +148,6 @@ class ContextBuilder:
                 f"Previous conversation summary (last active {session_summary['last_active']}):\n"
                 f"{session_summary['text']}"
             )
-
-        if agent_profile:
-            parts.append(agent_profile)
 
         return "\n\n---\n\n".join(parts)
 
@@ -284,7 +280,6 @@ class ContextBuilder:
         channel: str | None = None,
         workspace: Path | None = None,
         include_memory: bool = True,
-        agent_profile: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
@@ -296,7 +291,6 @@ class ContextBuilder:
                     session_summary=transcript.session_summary,
                     workspace=root,
                     include_memory=include_memory,
-                    agent_profile=agent_profile,
                 ),
             },
             *transcript.history,

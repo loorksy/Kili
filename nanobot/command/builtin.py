@@ -54,7 +54,6 @@ class BuiltinCommandSpec:
     arg_hint: str = ""
     lifecycle: CommandLifecycle = "side_channel"
     accepts_args: bool = False
-    hidden: bool = False
 
     def as_dict(self) -> dict[str, str | bool]:
         return {
@@ -69,8 +68,8 @@ class BuiltinCommandSpec:
 
 
 BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
-    BuiltinCommandSpec("/approve", "Approve action", "Approve the exact requested action.", "check", "<id>", accepts_args=True, hidden=True),
-    BuiltinCommandSpec("/deny", "Deny action", "Deny the requested action.", "x", "<id>", accepts_args=True, hidden=True),
+    BuiltinCommandSpec("/approve", "Approve action", "Approve the exact requested action.", "check", "<id>", accepts_args=True),
+    BuiltinCommandSpec("/deny", "Deny action", "Deny the requested action.", "x", "<id>", accepts_args=True),
     BuiltinCommandSpec(
         "/new",
         "New chat",
@@ -197,7 +196,7 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 
 def builtin_command_palette() -> list[dict[str, str | bool]]:
     """Return structured command metadata for UI command palettes."""
-    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS if not spec.hidden]
+    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 
 
 def builtin_command_starts_agent_turn(text: str) -> bool:
@@ -1061,8 +1060,6 @@ def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = ["🐈 nanobot commands:"]
     for spec in BUILTIN_COMMAND_SPECS:
-        if spec.hidden:
-            continue
         command = spec.command
         if spec.arg_hint:
             command = f"{command} {spec.arg_hint}"

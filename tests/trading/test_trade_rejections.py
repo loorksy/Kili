@@ -16,7 +16,7 @@ from test_execution import approve, setup
 
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.trading.metaapi import BrokerItem, BrokerPrice, SymbolSpec
-from nanobot.trading.preflight import accept_quote_time, validate_market
+from nanobot.trading.preflight import validate_market
 from nanobot.trading.proposals import TradeIntent, TradeProposals
 from nanobot.trading.retcodes import (
     ProviderDiagnostic,
@@ -107,20 +107,6 @@ def test_stop_distance_freeze_and_tick_lattice():
             BrokerItem(id="order", symbol=spec.symbol, type="ORDER_TYPE_SELL_LIMIT", openPrice="4129.36"))
     with pytest.raises(ValueError, match="tick size"):
         TradeProposals.validate_spec(intent.model_copy(update={"price": Decimal("4134.001")}), spec.model_copy(update={"tick_size": Decimal(".01")}))
-
-
-def test_closed_session_keeps_the_last_tick_for_a_preview():
-    intent, spec, price = terms()
-    sunday = datetime(2026, 10, 11, 8, 33, tzinfo=timezone.utc)
-    market = intent.model_copy(update={"order_type": "market", "price": None, "expiration_time": None})
-    last = price.model_copy(update={"time": "2026-10-09T20:57:59+00:00", "broker_time": "2026-10-09 20:57:59.000"})
-    accept_quote_time(spec, last, sunday)
-    validate_market(market, spec, last, sunday, allow_closed=True)
-    with pytest.raises(ValueError, match="Market is closed"):
-        validate_market(market, spec, last, sunday)
-    live = price.model_copy(update={"time": "2026-10-08T10:00:00+00:00", "broker_time": "2026-10-08 10:00:00.000"})
-    with pytest.raises(ValueError, match="stale"):
-        accept_quote_time(spec, live, NOW)
 
 
 def test_market_session_uses_broker_clock_and_gtc_is_omitted():

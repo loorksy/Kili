@@ -9,7 +9,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
-      content="Kili web UI — chat with your Kili workspace."
+      content="nanobot web UI — chat with your nanobot workspace."
       data-i18n-meta="description"
     />
     <meta
@@ -21,10 +21,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Kili" />
-    <link rel="icon" type="image/svg+xml" href="/brand/kili_mark.svg" />
-    <link rel="alternate icon" type="image/png" sizes="32x32" href="/brand/kili_favicon_32.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/brand/kili_apple_touch.png" />
+    <meta name="apple-mobile-web-app-title" content="nanobot" />
+    <link rel="icon" type="image/svg+xml" href="/brand/nanobot_mark.svg" />
+    <link rel="alternate icon" type="image/png" sizes="32x32" href="/brand/nanobot_favicon_32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/nanobot_apple_touch.png" />
     <link rel="manifest" href="/manifest.json" />
     <style>
       html,
@@ -47,7 +47,7 @@
         color: #0a0a0a;
         font-family:
           system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, "Noto Sans", "Noto Sans Arabic", "Noto Naskh Arabic", "Noto Sans SC",
+          "Helvetica Neue", Arial, "Noto Sans", "Noto Sans SC",
           "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
           sans-serif;
       }
@@ -116,7 +116,7 @@
         } catch {}
       })();
     </script>
-    <title>Kili</title>
+    <title>nanobot</title>
   </head>
   <body class="bg-background text-foreground antialiased">
     <div class="pwa-status-bar-surface" aria-hidden="true"></div>
@@ -128,7 +128,7 @@
         </div>
         <div class="startup-composer" aria-hidden="true"></div>
         <div class="startup-status" role="status">
-          <span data-boot-copy>Loading Kili…</span>
+          <span data-boot-copy>Loading nanobot…</span>
         </div>
       </main>
     </div>
@@ -137,59 +137,44 @@
         var localeKey = "nanobot.locale";
         var copy = {
           en: {
-            title: "Kili",
-            boot: "Loading Kili…",
-            description: "Kili web UI — chat with your Kili workspace."
+            boot: "Loading nanobot…",
+            description: "nanobot web UI — chat with your nanobot workspace."
           },
           "zh-CN": {
-            title: "Kili",
-            boot: "正在加载 Kili…",
-            description: "Kili Web UI —— 与你的 Kili 工作区对话。"
+            boot: "正在加载 nanobot…",
+            description: "nanobot Web UI —— 与你的 nanobot 工作区对话。"
           },
           "zh-TW": {
-            title: "Kili",
-            boot: "正在載入 Kili…",
-            description: "Kili Web UI —— 與你的 Kili 工作區對話。"
+            boot: "正在載入 nanobot…",
+            description: "nanobot Web UI —— 與你的 nanobot 工作區對話。"
           },
           fr: {
-            title: "Kili",
-            boot: "Chargement de Kili…",
-            description: "Interface web Kili — discutez avec votre espace de travail Kili."
+            boot: "Chargement de nanobot…",
+            description: "Interface web nanobot — discutez avec votre espace de travail nanobot."
           },
           ja: {
-            title: "Kili",
-            boot: "Kili を読み込み中…",
-            description: "Kili Web UI — Kili ワークスペースと会話します。"
+            boot: "nanobot を読み込み中…",
+            description: "nanobot Web UI — nanobot ワークスペースと会話します。"
           },
           ko: {
-            title: "Kili",
-            boot: "Kili 불러오는 중…",
-            description: "Kili 웹 UI — Kili 작업공간과 대화하세요."
+            boot: "nanobot 불러오는 중…",
+            description: "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
           },
           es: {
-            title: "Kili",
-            boot: "Cargando Kili…",
-            description: "Interfaz web de Kili: conversa con tu espacio de trabajo de Kili."
+            boot: "Cargando nanobot…",
+            description: "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
           },
           "pt-BR": {
-            title: "Kili",
-            boot: "Carregando Kili…",
-            description: "Interface web do Kili — converse com o seu espaço de trabalho do Kili."
+            boot: "Carregando nanobot…",
+            description: "Interface web do nanobot — converse com o seu espaço de trabalho do nanobot."
           },
           vi: {
-            title: "Kili",
-            boot: "Đang tải Kili…",
-            description: "Giao diện web Kili — trò chuyện với không gian làm việc Kili của bạn."
+            boot: "Đang tải nanobot…",
+            description: "Giao diện web nanobot — trò chuyện với không gian làm việc nanobot của bạn."
           },
           id: {
-            title: "Kili",
-            boot: "Memuat Kili…",
-            description: "UI web Kili — ngobrol dengan ruang kerja Kili Anda."
-          },
-          ar: {
-            title: "كيلي",
-            boot: "جارٍ تحميل كيلي…",
-            description: "واجهة كيلي على الويب — تحاور مع مساحة عمل كيلي."
+            boot: "Memuat nanobot…",
+            description: "UI web nanobot — ngobrol dengan ruang kerja nanobot Anda."
           }
         };
 
@@ -213,9 +198,6 @@
           if (lower === "pt" || lower.indexOf("pt-") === 0) {
             return "pt-BR";
           }
-          if (lower === "ar" || lower.indexOf("ar-") === 0) {
-            return "ar";
-          }
           var base = lower.split("-")[0];
           return copy[base] ? base : "en";
         }
@@ -230,10 +212,6 @@
           var locale = normalizeLocale(detected);
           var localized = copy[locale] || copy.en;
           document.documentElement.lang = locale;
-          document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
-          document.title = localized.title;
-          var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-          if (appleTitle) appleTitle.setAttribute("content", localized.title);
           var description = document.querySelector('[data-i18n-meta=\"description\"]');
           if (description) description.setAttribute("content", localized.description);
           var boot = document.querySelector("[data-boot-copy]");

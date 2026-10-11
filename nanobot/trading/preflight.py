@@ -29,51 +29,8 @@ def session_milliseconds(value: str) -> int:
     return ((hour * 60 + minute) * 60 + second) * 1000 + millis
 
 
-def session_is_open(spec: SymbolSpec, price: BrokerPrice, now: datetime) -> bool:
-    """True when the broker clock is inside a configured trade session."""
-    if spec.trade_sessions is None:
-        return True
-    if not price.broker_time:
-        reject("Broker session timezone is unavailable", "المنطقة الزمنية لجلسة الوسيط غير متاحة")
-    observed = datetime.fromisoformat(price.time.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
-    broker_time = datetime.fromisoformat(price.broker_time)
-    if broker_time.tzinfo is not None:
-        broker_time = broker_time.replace(tzinfo=None)
-    offset = broker_time - observed
-    offset = timedelta(minutes=round(offset.total_seconds() / 60))
-    local = now.astimezone(timezone.utc).replace(tzinfo=None) + offset
-    weekdays = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
-    millis = ((local.hour * 60 + local.minute) * 60 + local.second) * 1000 + local.microsecond // 1000
-    sessions = spec.trade_sessions.get(weekdays[local.weekday()]) or []
-    previous = spec.trade_sessions.get(weekdays[(local.weekday() - 1) % 7]) or []
-    opened = False
-    for session in sessions:
-        start, end = session_milliseconds(session.from_time), session_milliseconds(session.to_time)
-        opened |= start <= millis <= end if start <= end else millis >= start
-    for session in previous:
-        start, end = session_milliseconds(session.from_time), session_milliseconds(session.to_time)
-        opened |= start > end and millis <= end
-    return opened
-
-
-def accept_quote_time(spec: SymbolSpec, price: BrokerPrice, now: datetime) -> None:
-    """A live session needs a recent tick. A closed session keeps its last tick."""
-    observed = datetime.fromisoformat(price.time.replace("Z", "+00:00"))
-    if observed.tzinfo is None:
-        reject("Broker price is stale or has no trusted timestamp", "سعر الوسيط قديم أو بلا وقت موثوق")
-    age = (now - observed.astimezone(timezone.utc)).total_seconds()
-    if age < -30:
-        reject("Broker price is stale or has no trusted timestamp", "سعر الوسيط قديم أو بلا وقت موثوق")
-    if age <= 300:
-        return
-    closed = spec.trade_sessions is not None and bool(price.broker_time) and not session_is_open(spec, price, now)
-    if closed:
-        return
-    reject("Broker price is stale or has no trusted timestamp", "سعر الوسيط قديم أو بلا وقت موثوق")
-
-
 def validate_market(intent: TradeIntent, spec: SymbolSpec, price: BrokerPrice,
-                    now: datetime, target: BrokerItem | None = None, *, allow_closed: bool = False) -> None:
+                    now: datetime, target: BrokerItem | None = None) -> None:
     pending = intent.operation == "modify_order" or (intent.operation == "open" and intent.order_type != "market")
     point = spec.point or Decimal(1).scaleb(-spec.digits)
     distance = Decimal(spec.stops_level) * point
@@ -131,6 +88,27 @@ def validate_market(intent: TradeIntent, spec: SymbolSpec, price: BrokerPrice,
         market = price.ask if side == "buy" else price.bid
         if target.open_price is None or abs(target.open_price - market) <= Decimal(spec.freeze_level) * point:
             reject("Pending order is within broker freeze distance", "الأمر المعلّق داخل مسافة التجميد لدى الوسيط")
-    if spec.trade_sessions is not None and intent.operation != "cancel_order" and not allow_closed:
-        if not session_is_open(spec, price, now):
+    if spec.trade_sessions is not None and intent.operation != "cancel_order":
+        if not price.broker_time:
+            reject("Broker session timezone is unavailable", "المنطقة الزمنية لجلسة الوسيط غير متاحة")
+        observed = datetime.fromisoformat(price.time.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+        broker_time = datetime.fromisoformat(price.broker_time)
+        if broker_time.tzinfo is not None:
+            broker_time = broker_time.replace(tzinfo=None)
+        offset = broker_time - observed
+        # Broker clock offsets are minute-aligned; discard transmission jitter.
+        offset = timedelta(minutes=round(offset.total_seconds() / 60))
+        local = now.astimezone(timezone.utc).replace(tzinfo=None) + offset
+        weekdays = ("MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY")
+        millis = ((local.hour * 60 + local.minute) * 60 + local.second) * 1000 + local.microsecond // 1000
+        sessions = spec.trade_sessions.get(weekdays[local.weekday()]) or []
+        previous = spec.trade_sessions.get(weekdays[(local.weekday() - 1) % 7]) or []
+        opened = False
+        for session in sessions:
+            start, end = session_milliseconds(session.from_time), session_milliseconds(session.to_time)
+            opened |= start <= millis <= end if start <= end else millis >= start
+        for session in previous:
+            start, end = session_milliseconds(session.from_time), session_milliseconds(session.to_time)
+            opened |= start > end and millis <= end
+        if not opened:
             reject("Market is closed for this symbol", "السوق مغلق لهذا الرمز حالياً")

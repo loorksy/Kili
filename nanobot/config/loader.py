@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 from typing import Any, cast, overload
 
-from loguru import logger
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
 
@@ -121,7 +120,6 @@ def load_config(config_path: Path | None = None) -> Config:
         )
 
     data = _migrate_config(cast(dict[str, Any], data))
-    _persist_stock_bot_name(path, data)
     try:
         config = Config.model_validate(data)
     except ValidationError as exc:
@@ -344,25 +342,6 @@ def _env_replace(match: re.Match[str]) -> str:
             f"Environment variable '{name}' referenced in config is not set"
         )
     return value
-
-
-def _persist_stock_bot_name(path: Path, data: dict[str, Any]) -> None:
-    """Write Kili back when an existing config still stores the old product name."""
-    agents = _as_config_object(data.get("agents"))
-    if agents is None:
-        return
-    defaults = _as_config_object(agents.get("defaults"))
-    if defaults is None:
-        return
-    raw_name = cast(object, defaults.get("botName", defaults.get("bot_name")))
-    if raw_name != "nanobot":
-        return
-    defaults.pop("bot_name", None)
-    defaults["botName"] = "Kili"
-    try:
-        _write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    except OSError:
-        logger.exception("Could not persist bot name")
 
 
 def _migrate_config(data: dict[str, Any]) -> dict[str, Any]:

@@ -194,14 +194,12 @@ class ActionStore:
             db.execute("INSERT INTO approvals VALUES (?,?,?)", (record.id, record.fingerprint, record.model_dump_json()))
             return record
 
-    def resolve(self, approval_id: str, *, principal: str, approve: bool, fingerprint: str | None = None) -> Approval:
+    def resolve(self, approval_id: str, *, principal: str, approve: bool) -> Approval:
         """Called exclusively by authenticated user interaction adapters, never a tool."""
         with self.transaction() as db:
             record = self._approval(db, approval_id)
             if record.action.principal != principal:
                 raise PermissionError("Approval belongs to another conversation")
-            if fingerprint is not None and fingerprint != record.fingerprint:
-                raise PermissionError("Approval fingerprint does not match this action")
             if record.status != "PENDING" or record.expires_at <= now_ms():
                 raise ValueError("Approval is no longer pending")
             record.status = "APPROVED" if approve else "DENIED"
@@ -255,19 +253,7 @@ class ActionStore:
         if approval.action.principal != principal:
             raise PermissionError("Approval belongs to another conversation")
         status = "EXPIRED" if approval.status == "PENDING" and approval.expires_at <= now_ms() else approval.status
-        return {"id": approval.id, "status": status, "fingerprint": approval.fingerprint,
-                "expires_at": approval.expires_at, "card": approval_card(approval),
-                "action": approval.action.parameters}
-
-    def pending_for_fingerprint(self, fingerprint: str, principal: str) -> Approval:
-        with self.transaction() as db:
-            rows = db.execute("SELECT record FROM approvals WHERE fingerprint=?", (fingerprint,)).fetchall()
-        for row in rows:
-            record = Approval.model_validate_json(row[0])
-            if (record.action.principal == principal and record.status == "PENDING"
-                    and record.expires_at > now_ms() and record.fingerprint == fingerprint):
-                return record
-        raise ValueError("No pending approval for this action")
+        return {"id": approval.id, "status": status, "action": approval.action.parameters}
 
     def consume_approval(self, action: Action) -> Approval | None:
         with self.transaction() as db:
@@ -493,11 +479,11 @@ class ActionPolicy:
             _POLICY_APPROVAL.set((action.fingerprint,consumed.id))
             return None
         approval = store.request(action)
-        return (f"Waiting for approval {approval.id}. {review.reason}. "
-                "Show the approval card and wait for its Approve or Deny button. "
-                "Do not ask the owner to type a slash command.\n"
+        return (f"Waiting for approval: {approval.id}. {review.reason}. "
+                f"User: /approve {approval.id} or /deny {approval.id}. "
+                f"Action: {json.dumps(action.parameters, sort_keys=True)}\n"
                 "```action_approval\n" + json.dumps({"approval_id": approval.id,
-                    "session_key": action.principal}) + "\n```")
+                    "session_key": action.principal, "action": action.parameters}) + "\n```")
 
 
 class ProviderAutoReviewer:
@@ -521,35 +507,3 @@ class ProviderAutoReviewer:
         if response.tool_calls or not response.content:
             raise ValueError("Invalid reviewer response")
         return Review.model_validate_json(response.content)
-
-
-def approval_card(approval: Approval) -> dict[str, JsonValue]:
-    """Owner-visible terms. The button still submits the stored fingerprint."""
-    params = approval.action.parameters
-    intent_raw = params.get("intent")
-    envelope_raw = params.get("envelope")
-    intent = intent_raw if isinstance(intent_raw, dict) else {}
-    envelope = envelope_raw if isinstance(envelope_raw, dict) else {}
-    instruments = envelope.get("allowed_instruments")
-    instrument = params.get("broker_symbol") or intent.get("canonical_instrument")
-    if instrument is None and isinstance(instruments, list) and instruments:
-        instrument = instruments[0]
-
-    def text(value: object) -> str | None:
-        if value is None or value == "":
-            return None
-        return str(value)
-
-    return {
-        "instrument": text(instrument),
-        "side": text(intent.get("side")),
-        "volume": text(intent.get("volume") or params.get("volume")),
-        "entry": text(intent.get("price")),
-        "stop_loss": text(intent.get("stop_loss")),
-        "take_profit": text(intent.get("take_profit")),
-        "risk": text(envelope.get("max_risk_per_trade") or envelope.get("max_mission_loss") or params.get("risk")),
-        "account": text(params.get("account_id") or envelope.get("account_id")),
-        "mode": text(envelope.get("mode")),
-        "expires_at": approval.expires_at,
-        "fingerprint": approval.fingerprint,
-    }
