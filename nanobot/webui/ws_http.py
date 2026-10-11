@@ -977,6 +977,10 @@ class GatewayHTTPHandler:
             update_chart,
         )
 
+        if path == "/api/webui/action-approvals/resolve" and not getattr(
+            request, _WEBUI_MUTATION_REQUEST_ATTR, False
+        ):
+            return _http_error(405, "Approval requires authenticated WebSocket")
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         payload = _mutation_payload(request)
