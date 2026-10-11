@@ -877,18 +877,16 @@ def _run_gateway(
         return min(deadlines) if deadlines else None
 
     if config.tools.integrations.broker_accounts():
-        import hashlib
-
         from nanobot.market.broker import BrokerMarket
-        from nanobot.market.watchers import MarketWatcher, MarketWatchers
-        from nanobot.session.records import RecordStore
+        from nanobot.market.watchers import MarketWatchers, open_watcher_records
         from nanobot.trading.accounts import TradingAccounts
 
-        namespace = hashlib.sha256(str(session_manager.workspace).encode()).hexdigest()
+        watcher_records = open_watcher_records(session_manager.workspace)
         for account_id in config.tools.integrations.broker_accounts():
             market_watchers = MarketWatchers(
-                BrokerMarket(TradingAccounts(config.tools.integrations).client(account_id)), session_manager.responsibilities,
-                RecordStore("market_watchers:" + namespace, MarketWatcher),
+                BrokerMarket(TradingAccounts(config.tools.integrations).client(account_id)),
+                session_manager.responsibilities,
+                watcher_records,
             )
             cron.register_deadline_source("market_conditions:" + account_id, market_watchers.nearest,
                                           market_watchers.run_due)

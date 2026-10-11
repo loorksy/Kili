@@ -17,6 +17,7 @@ from typing import Literal, cast
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from filelock import FileLock
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from nanobot.security.runtime_storage import internal_state_root
@@ -118,6 +119,9 @@ class ResponsibilityStore:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._lock = FileLock(str(self.root / ".lock"))
         self.on_change: Callable[[], None] | None = None
+        # Watcher reconciliation runs here. It may not re-enter this lock.
+        self.lifecycle_listeners: list[Callable[[Responsibility], None]] = []
+        self._listener_warnings: dict[str, float] = {}
 
     def _path(self, responsibility_id: str) -> Path:
         import re
@@ -215,6 +219,19 @@ class ResponsibilityStore:
         self._path(record.id).chmod(0o600)
         if self.on_change is not None:
             self.on_change()
+        for listener in list(self.lifecycle_listeners):
+            try:
+                listener(record)
+            except Exception:
+                self._warn_listener(record.id)
+
+    def _warn_listener(self, responsibility_id: str) -> None:
+        now = time.monotonic()
+        previous = self._listener_warnings.get(responsibility_id)
+        if previous is not None and now - previous < 60:
+            return
+        self._listener_warnings[responsibility_id] = now
+        logger.warning("Responsibility lifecycle listener failed for {}", responsibility_id)
 
     def enqueue(self, responsibility_id: str, wake_id: str, content: str) -> bool:
         """Persist receipt before acknowledging an upstream delivery."""

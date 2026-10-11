@@ -66,10 +66,25 @@ class RecordStore(Generic[_RecordT]):
         return record.model_copy(deep=True)
 
     def save(self, record: _RecordT) -> _RecordT:
+        """Model-facing write. A closed or superseded execution cannot persist."""
+        return self._update(record, fenced=True)
+
+    def save_trusted(self, record: _RecordT) -> _RecordT:
+        """Revision-checked write for authenticated owner control and the scheduler.
+
+        Model tools must keep using ``save``. This does not grant a tool the
+        ability to bypass responsibility ownership.
+        """
+        return self._update(record, fenced=False)
+
+    def _update(self, record: _RecordT, *, fenced: bool) -> _RecordT:
         updated = record.model_copy(deep=True)
         updated.revision += 1
         updated.updated_at = now_ms()
-        with self.execution_write(), self.journal.transaction() as db:
+        with ExitStack() as stack:
+            if fenced:
+                stack.enter_context(self.execution_write())
+            db = stack.enter_context(self.journal.transaction())
             cursor = db.execute("UPDATE records SET revision=?,record=? WHERE namespace=? AND id=? AND revision=?",
                                 (updated.revision, updated.model_dump_json(), self.namespace, record.id, record.revision))
             if cursor.rowcount != 1:

@@ -206,6 +206,7 @@ _WEBUI_MUTATION_PATHS = {
     "approval.resolve": "/api/webui/action-approvals/resolve",
     "approval.edit": "/api/webui/action-approvals/edit",
     "mission.control": "/api/webui/trading-missions/control",
+    "watcher.cancel": "/api/webui/market-watchers/cancel",
     "subagent.cancel": "/api/webui/subagents/cancel",
     "settings.agent.update": "/api/settings/update",
     "settings.model_configuration.create": "/api/settings/model-configurations/create",
@@ -571,6 +572,7 @@ class GatewayHTTPHandler:
             "/api/webui/sidebar-state/update",
             "/api/workspaces/pick-folder",
             "/api/webui/subagents/cancel",
+            "/api/webui/market-watchers/cancel",
         }
 
     @staticmethod
@@ -627,7 +629,8 @@ class GatewayHTTPHandler:
 
         if got in {"/api/webui/cloud-charts", "/api/webui/cloud-charts/candles",
                    "/api/webui/cloud-charts/update", "/api/webui/action-approvals", "/api/webui/action-approvals/resolve", "/api/webui/action-approvals/edit",
-                   "/api/webui/trading-missions", "/api/webui/trading-missions/control"}:
+                   "/api/webui/trading-missions", "/api/webui/trading-missions/control",
+                   "/api/webui/market-watchers/cancel"}:
             return await self._handle_cloud_resource(request, got)
 
         # Recovery routes
@@ -984,7 +987,14 @@ class GatewayHTTPHandler:
         if self.session_manager is None or self.session_manager.get_existing(principal) is None:
             return _http_error(404, "Conversation unavailable")
         try:
-            if path.startswith("/api/webui/trading-missions"):
+            if path == "/api/webui/market-watchers/cancel":
+                from nanobot.market.watch_control import cancel_owned_watcher
+                if payload is None or not isinstance(payload.get("watcher_id"), str):
+                    return _http_error(405, "Watcher cancellation requires authenticated WebSocket")
+                result = cancel_owned_watcher(
+                    self.session_manager.workspace, principal, payload["watcher_id"],
+                )
+            elif path.startswith("/api/webui/trading-missions"):
                 from nanobot.webui.mission_resources import (
                     MissionControl,
                     control_mission,

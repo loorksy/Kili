@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field, replace
@@ -109,6 +110,20 @@ def request_context(ctx: RequestContext):
 
 def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
+
+
+@contextmanager
+def isolated_from_request_context() -> Generator[None, None, None]:
+    """Run trusted scheduler work outside any model execution scope.
+
+    A cron callback can inherit a closed request context. Record writes from
+    that scope are rejected on purpose; lifecycle reconciliation must not be.
+    """
+    token = _CURRENT_REQUEST_CONTEXT.set(None)
+    try:
+        yield
+    finally:
+        _CURRENT_REQUEST_CONTEXT.reset(token)
 
 
 def tool_log_content_allowed() -> bool:
