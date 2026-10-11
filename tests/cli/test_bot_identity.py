@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
+from nanobot.config.loader import load_config
 from nanobot.config.schema import AgentDefaults, Config
 
 
@@ -22,6 +26,40 @@ def test_bot_name_and_icon_can_be_overridden_via_config() -> None:
 
     assert config.agents.defaults.bot_name == "mybot"
     assert config.agents.defaults.bot_icon == "🤖"
+
+
+def test_load_config_persists_the_stock_bot_name(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({
+            "agents": {"defaults": {"botName": "nanobot", "botIcon": "🐈", "timezoneMode": "manual", "timezone": "UTC"}},
+            "gateway": {"port": 8765},
+        }),
+        encoding="utf-8",
+    )
+    loaded = load_config(path)
+    assert loaded.agents.defaults.bot_name == "Kili"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["botName"] == "Kili"
+    assert saved["agents"]["defaults"]["botIcon"] == "🐈"
+    assert saved["gateway"]["port"] == 8765
+    unchanged = path.read_text(encoding="utf-8")
+    load_config(path)
+    assert path.read_text(encoding="utf-8") == unchanged
+
+    snake = tmp_path / "snake.json"
+    snake.write_text(
+        json.dumps({"agents": {"defaults": {"bot_name": "nanobot"}}}),
+        encoding="utf-8",
+    )
+    assert load_config(snake).agents.defaults.bot_name == "Kili"
+    assert json.loads(snake.read_text(encoding="utf-8"))["agents"]["defaults"]["botName"] == "Kili"
+
+    custom = tmp_path / "custom.json"
+    original = json.dumps({"agents": {"defaults": {"botName": "mybot"}}})
+    custom.write_text(original, encoding="utf-8")
+    assert load_config(custom).agents.defaults.bot_name == "mybot"
+    assert custom.read_text(encoding="utf-8") == original
 
 
 def test_bot_icon_accepts_empty_string_to_omit() -> None:

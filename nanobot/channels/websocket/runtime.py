@@ -676,6 +676,9 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
+        from nanobot.webui.http_methods import install_plain_http_methods
+
+        install_plain_http_methods()
         self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 

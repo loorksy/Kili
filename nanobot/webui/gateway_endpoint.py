@@ -49,6 +49,9 @@ class WebUIGatewayEndpoint:
         self._http = http
         self._tokens = tokens
         self.webui_connections: set[ServerConnection] = set()
+        # Connections capture ServerProtocol.parse in their constructor, so the
+        # plain-HTTP parser has to be installed before the listener accepts.
+        install_plain_http_methods()
 
     async def process_request(
         self,
