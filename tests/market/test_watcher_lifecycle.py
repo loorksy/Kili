@@ -351,6 +351,39 @@ def _internal_root(tmp_path):
     return fake
 
 
+def test_pause_from_another_process_updates_shared_watcher_rows(tmp_path, monkeypatch):
+    fake_root = _internal_root(tmp_path)
+    monkeypatch.setattr("nanobot.session.responsibilities.internal_state_root", fake_root)
+    monkeypatch.setattr("nanobot.security.runtime_storage.get_config_path", lambda: tmp_path / "config.json")
+    workspace = tmp_path / "workspace"
+    gateway = ResponsibilityStore(workspace)
+    parent = gateway.create(
+        objective="Watcher lifecycle acceptance", session_key="websocket:vps-accept",
+        channel="websocket", chat_id="vps-accept",
+    )
+    records = open_watcher_records(workspace)
+    records.create(_watcher(parent.id, "watch_vps_accept", provider_instrument="EURUSD",
+                            canonical_instrument="EURUSD", threshold=Decimal("1")))
+    owner = ResponsibilityStore(workspace)
+    paused = owner.get(parent.id)
+    paused.state = "PAUSED"
+    paused.next_wake_ms = None
+    owner.control_update(paused)
+    assert records.get("watch_vps_accept").lifecycle == "SUSPENDED_BY_PARENT"
+    resumed = owner.get(parent.id)
+    resumed.state = "SCHEDULED"
+    resumed.recovery_required = False
+    resumed.waiting_for = None
+    resumed.next_wake_ms = 5_000
+    owner.control_update(resumed)
+    assert records.get("watch_vps_accept").lifecycle == "ACTIVE"
+    owner.control_update(owner.get(parent.id).model_copy(update={"state": "PAUSED", "next_wake_ms": None}))
+    cancelled = cancel_owned_watcher(
+        workspace, "websocket:vps-accept", "watch_vps_accept", records=records, responsibilities=owner,
+    )
+    assert cancelled["lifecycle"] == "CANCELLED"
+
+
 async def test_owner_cancel_http_is_authenticated_and_scoped(tmp_path, monkeypatch):
     fake_root = _internal_root(tmp_path)
     monkeypatch.setattr("nanobot.session.responsibilities.internal_state_root", fake_root)

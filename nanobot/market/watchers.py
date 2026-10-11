@@ -122,17 +122,40 @@ class MarketWatcher(RuntimeRecord):
         return self
 
 
-def watcher_namespace(workspace: Path | str) -> str:
-    """Same namespace the gateway and the model tool already share.
+def watcher_namespaces(workspace: Path | str) -> list[str]:
+    """Namespaces for one workspace, resolved path first.
 
-    The input is hashed as given. Callers pass the workspace path they already
-    persist; resolving it again would orphan existing watcher rows.
+    Responsibility files are stored under the resolved workspace. A caller that
+    still has the unresolved path must see those same watcher rows.
     """
-    return "market_watchers:" + hashlib.sha256(str(workspace).encode()).hexdigest()
+    raw = str(workspace)
+    canonical = str(Path(workspace).expanduser().resolve())
+    keys = [canonical] if raw == canonical else [canonical, raw]
+    return ["market_watchers:" + hashlib.sha256(key.encode()).hexdigest() for key in keys]
+
+
+def watcher_namespace(workspace: Path | str) -> str:
+    """Canonical watcher namespace shared by the gateway and owner control."""
+    return watcher_namespaces(workspace)[0]
 
 
 def open_watcher_records(workspace: Path | str) -> RecordStore[MarketWatcher]:
     return RecordStore(watcher_namespace(workspace), MarketWatcher)
+
+
+def sync_watchers_for_parent(workspace: Path, parent: Responsibility) -> None:
+    """Apply one parent lifecycle to its watchers in every shared namespace.
+
+    The writer may be another process from the gateway scheduler. The watcher
+    row has to change in this same call, not on a later timer tick.
+    """
+    now = time.time_ns() // 1_000_000
+    seen: set[str] = set()
+    for namespace in watcher_namespaces(workspace):
+        if namespace in seen:
+            continue
+        seen.add(namespace)
+        MarketWatchers.apply_parent(RecordStore(namespace, MarketWatcher), parent, now)
 
 
 def watcher_public(watcher: MarketWatcher) -> dict[str, object]:
@@ -159,6 +182,16 @@ class MarketWatchers:
         self.records = records or RecordStore("market_watchers", MarketWatcher)
         self._bind_parent_listener()
         self.reconcile()
+
+    @staticmethod
+    def apply_parent(records: RecordStore[MarketWatcher], parent: Responsibility, now: int) -> None:
+        binder = MarketWatchers.__new__(MarketWatchers)
+        binder.records = records
+        for watcher in records.list():
+            if watcher.responsibility_id != parent.id:
+                continue
+            if binder._sync(watcher, parent, now):
+                binder._persist(watcher)
 
     def _bind_parent_listener(self) -> None:
         markers = _BOUND_WATCHERS.setdefault(self.responsibilities, set())
@@ -280,7 +313,8 @@ class MarketWatchers:
             return self.records.save_trusted(watcher)
         except ValueError:
             fresh = self.records.get(watcher.id)
-            if fresh.lifecycle != "ACTIVE":
+            # A newer pause, resume, or cancel already won this revision.
+            if fresh.lifecycle != watcher.lifecycle:
                 return fresh
             watcher.revision = fresh.revision
             return self.records.save_trusted(watcher)
